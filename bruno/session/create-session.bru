@@ -1,0 +1,31 @@
+meta {
+  name: Create Session
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/session
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "userId": "{{testUserId}}"
+  }
+}
+
+docs {
+  ## POST /api/session
+
+  セッション開始。VAPIトークンを発行し、System Promptにユーザーのメモリを注入。
+
+  ### Response (200)
+  ```json
+  {
+    "token": "vapi-token-string",
+    "sessionId": "session-uuid"
+  }
+  ```
+}

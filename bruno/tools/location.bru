@@ -1,0 +1,27 @@
+meta {
+  name: Get Location Info
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/tools/location
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "lat": 35.6762,
+    "lng": 139.6503,
+    "userId": "{{testUserId}}"
+  }
+}
+
+docs {
+  ## POST /api/tools/location
+
+  位置情報処理。逆ジオコーディングと周辺施設検索。
+
+  サンプル座標: 渋谷駅付近
+}

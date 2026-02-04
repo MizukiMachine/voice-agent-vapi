@@ -1,0 +1,88 @@
+{
+  "testCases": [
+    {
+      "id": "temple-01",
+      "category": "temples",
+      "input": "清水寺",
+      "expected": "きよみずでら",
+      "description": "Kiyomizu-dera temple"
+    },
+    {
+      "id": "temple-02",
+      "category": "temples",
+      "input": "金閣寺",
+      "expected": "きんかくじ",
+      "description": "Kinkaku-ji temple"
+    },
+    {
+      "id": "temple-03",
+      "category": "temples",
+      "input": "銀閣寺",
+      "expected": "ぎんかくじ",
+      "description": "Ginkaku-ji temple"
+    },
+    {
+      "id": "temple-04",
+      "category": "temples",
+      "input": "浅草寺",
+      "expected": "せんそうじ",
+      "description": "Senso-ji temple"
+    },
+    {
+      "id": "shrine-01",
+      "category": "shrines",
+      "input": "伊勢神宮",
+      "expected": "いせじんぐう",
+      "description": "Ise Grand Shrine"
+    },
+    {
+      "id": "shrine-02",
+      "category": "shrines",
+      "input": "靖国神社",
+      "expected": "やすくにじんじゃ",
+      "description": "Yasukuni Shrine"
+    },
+    {
+      "id": "place-01",
+      "category": "places",
+      "input": "東京",
+      "expected": "とうきょう",
+      "description": "Tokyo"
+    },
+    {
+      "id": "place-02",
+      "category": "places",
+      "input": "京都",
+      "expected": "きょうと",
+      "description": "Kyoto"
+    },
+    {
+      "id": "place-03",
+      "category": "places",
+      "input": "渋谷",
+      "expected": "しぶや",
+      "description": "Shibuya"
+    },
+    {
+      "id": "place-04",
+      "category": "places",
+      "input": "銀座",
+      "expected": "ぎんざ",
+      "description": "Ginza"
+    },
+    {
+      "id": "sentence-01",
+      "category": "sentences",
+      "input": "清水寺に行きます",
+      "expected": "きよみずでらにいきます",
+      "description": "Going to Kiyomizu-dera"
+    },
+    {
+      "id": "sentence-02",
+      "category": "sentences",
+      "input": "金閣寺と銀閣寺を見ました",
+      "expected": "きんかくじとぎんかくじをみました",
+      "description": "Saw Kinkaku-ji and Ginkaku-ji"
+    }
+  ]
+}

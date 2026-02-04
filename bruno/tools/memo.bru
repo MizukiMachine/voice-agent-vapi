@@ -1,0 +1,25 @@
+meta {
+  name: Save Memo
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/tools/memo
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "userId": "{{testUserId}}",
+    "content": "明日の会議は10時から",
+    "sessionId": "{{testSessionId}}"
+  }
+}
+
+docs {
+  ## POST /api/tools/memo
+
+  明示的なメモ保存。ユーザーが「これを覚えておいて」と言った場合に使用。
+}

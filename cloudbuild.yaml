@@ -1,0 +1,77 @@
+# ============================================================
+# Cloud Build configuration for Cloud Run deployment
+# OpenAI Realtime API Direct Integration
+# ============================================================
+#
+# Secret Manager secrets (registered with uppercase names):
+# - SUPABASE-SECRET-KEY (Supabase Service Role Key)
+# - OPENAI-API-KEY (OpenAI API Key)
+#
+# NOTE: Google APIs (Calendar, Docs, Maps) are currently not configured.
+# Tools will return "not configured" errors when called.
+# To enable, register secrets in Secret Manager and add to --set-secrets below.
+#
+# Client-side variables (NEXT_PUBLIC_*) are baked in at build time from .env
+# Server-side variables are injected at runtime from Secret Manager
+# ============================================================
+
+steps:
+  # Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/voice-engine-studio/app:$COMMIT_SHA'
+      - '-t'
+      - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/voice-engine-studio/app:latest'
+      - '.'
+
+  # Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/voice-engine-studio/app:$COMMIT_SHA'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'voice-engine-studio'
+      - '--image'
+      - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/voice-engine-studio/app:$COMMIT_SHA'
+      - '--region'
+      - 'asia-northeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--max-instances'
+      - '5'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '3600'
+      - '--concurrency'
+      - '80'
+      - '--min-instances'
+      - '0'
+      - '--session-affinity'
+      - '--set-env-vars'
+      - 'NODE_ENV=production'
+      - '--set-secrets'
+      - 'SUPABASE_SERVICE_ROLE_KEY=SUPABASE-SECRET-KEY:latest,OPENAI_API_KEY=OPENAI-API-KEY:latest'
+      # Note: NEXT_PUBLIC_* variables are baked-in at build time from .env
+
+# Cloud Build timeout
+timeout: '1800s'
+
+# Images to build
+images:
+  - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/voice-engine-studio/app:$COMMIT_SHA'
+  - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/voice-engine-studio/app:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'

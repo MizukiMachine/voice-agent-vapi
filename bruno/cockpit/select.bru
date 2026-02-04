@@ -1,0 +1,23 @@
+meta {
+  name: Select User
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/cockpit/select
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "userId": "{{testUserId}}"
+  }
+}
+
+docs {
+  ## POST /api/cockpit/select
+
+  検証用ユーザー選択。
+}

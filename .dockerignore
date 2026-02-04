@@ -1,0 +1,68 @@
+# ============================================================
+# Dockerignore - Exclude unnecessary files from build context
+# Optimized for OpenAI Realtime API Direct Integration
+# ============================================================
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development/Testing
+tests/
+__tests__/
+scripts/
+coverage/
+.nyc_output/
+
+# Git & Claude
+.git/
+.claude/
+
+# Qwen TTS (removed in Issue #25)
+qwen_env/
+Dockerfile.qwen-tts
+cloudbuild-qwen.yaml
+.gcloudignore.qwen
+
+# Environment & Secrets
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.keys
+*.pem
+# Note: .env is required for build (encrypted)
+# .env.keys MUST NEVER be in build context (use Secret Manager)
+
+# Node modules (installed during build)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js build output (generated during build)
+.next/
+out/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Misc
+.cache/
+tmp/
+temp/

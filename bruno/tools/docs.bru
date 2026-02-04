@@ -1,0 +1,31 @@
+meta {
+  name: Docs - Create Document
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/tools/docs
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "action": "create",
+    "userId": "{{testUserId}}",
+    "title": "テストドキュメント",
+    "content": "これはテストです。"
+  }
+}
+
+docs {
+  ## POST /api/tools/docs
+
+  Google Docsとの連携。ドキュメントの作成・編集。
+
+  ### Actions
+  - create: ドキュメント作成
+  - read: ドキュメント読取
+  - append: ドキュメント追記
+}

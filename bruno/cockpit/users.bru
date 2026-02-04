@@ -1,0 +1,17 @@
+meta {
+  name: List Users
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/cockpit/users
+  body: none
+  auth: none
+}
+
+docs {
+  ## GET /api/cockpit/users
+
+  登録済みユーザー一覧取得。
+}

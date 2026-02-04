@@ -1,0 +1,26 @@
+meta {
+  name: Call Ended Webhook
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/webhooks/call-ended
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "type": "call-ended",
+    "callId": "call-uuid-12345",
+    "transcript": "こんにちは、今日の予定を教えて。明日の会議は10時からです。コーヒーが好きです。",
+    "userId": "{{testUserId}}"
+  }
+}
+
+docs {
+  ## POST /api/webhooks/call-ended
+
+  VAPI通話終了時のWebhook。会話ログからFactを抽出してDBに保存。
+}

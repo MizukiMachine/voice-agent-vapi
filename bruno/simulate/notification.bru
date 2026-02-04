@@ -1,0 +1,25 @@
+meta {
+  name: Simulate Notification
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/simulate/notification
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "message": "新着メッセージがあります",
+    "userId": "{{testUserId}}",
+    "vapiSessionId": "{{testSessionId}}"
+  }
+}
+
+docs {
+  ## POST /api/simulate/notification
+
+  通知シミュレーション。Push通知がない環境でのテスト用。
+}

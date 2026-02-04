@@ -1,0 +1,73 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Environment files (secrets)
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.keys
+.env.backup*
+.env.old
+# Note: .env contains only NEXT_PUBLIC_* variables (client-side, safe)
+# Server-side secrets are managed in Google Cloud Secret Manager
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Vercel
+.vercel
+
+# Supabase (local development)
+supabase/.branches/
+supabase/.temp/
+
+# Work logs (session-specific, not for version control)
+docs/logs/
+
+# Claude Code local settings
+/.claude
+
+# Misc
+*.log
+*.pid
+*.seed
+
+# Qwen TTS
+qwen-env/
+qwen-tts.pid
+.qwen-server.pid
+.qwen-server.log
+
+settings.json
+

@@ -1,0 +1,28 @@
+meta {
+  name: Calendar - List Events
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/tools/calendar
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "action": "list",
+    "userId": "{{testUserId}}"
+  }
+}
+
+docs {
+  ## POST /api/tools/calendar
+
+  Google Calendarとの連携。予定の取得・作成。
+
+  ### Actions
+  - list: 予定一覧取得
+  - create: 予定作成
+}

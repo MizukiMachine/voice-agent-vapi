@@ -1,0 +1,29 @@
+meta {
+  name: Simulate Location
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/simulate/location
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "input": "東京駅",
+    "userId": "{{testUserId}}",
+    "vapiSessionId": "{{testSessionId}}"
+  }
+}
+
+docs {
+  ## POST /api/simulate/location
+
+  位置シミュレーション。GPSがない環境でのテスト用。
+
+  ### Input formats
+  - 文字列: "東京駅" → ジオコーディングで座標取得
+  - オブジェクト: { "lat": 35.6812, "lng": 139.7671 } → 直接座標指定
+}
