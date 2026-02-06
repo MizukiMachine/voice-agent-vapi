@@ -1,0 +1,628 @@
+project:
+  name: "voice-agent-vapi-cartesia"
+  purpose: "iOSネイティブ/Meta Glassアプリ開発の前段として、音声AIバックエンドの疎通確認とロジック検証を行うWebベースのPoC"
+  migration_target:
+    from: "OpenAI Realtime API (Direct)"
+    to: "Vapi + Cartesia"
+  migration_reason:
+    - "音声速度の変更機能が必要（OpenAI Realtimeでは非対応）"
+    - "カスタムボイスの実現が必要（Cartesiaで対応可能）"
+
+principles:
+  client_is_thin:
+    description: "Client is Thin, Server is Fat"
+    client_responsibilities:
+      - "マイクで音声取得 → サーバーに送信"
+      - "サーバーから受信した音声 → スピーカーで再生"
+      - "UI表示のみ"
+    server_responsibilities:
+      - "記憶管理"
+      - "判断・推論（LLM）"
+      - "音声変換（STT/TTS）"
+      - "ツール実行の全てを集約"
+    note: "クライアントはSTT/LLM/TTSを行わない。全てサーバー側で処理"
+
+  one_api:
+    description: "One API 原則"
+    base_url: "https://<server-base-url>/api/*"
+    rules:
+      - "全てのクライアント（Web/iOS/Meta Glass）が同一のAPI群を使う"
+      - "クライアント固有のエンドポイントは作らない"
+      - "Cloud Run等にデプロイした1つのサーバーが全クライアントに対応"
+      - "クライアントはBase URLさえ知っていれば動作する"
+
+  backward_compatibility:
+    description: "移行互換性（クライアントWebRTC維持）"
+    client_changes:
+      minimal: true
+      note: "クライアント側の変更を最小限にする"
+      sdk:
+        keep_using: "@openai/realtime-sdk または WebRTC標準API"
+        reason: "WebRTC接続を維持するため"
+      connection:
+        protocol: "WebRTC (変更なし)"
+        endpoint: "POST /api/session (維持)"
+    server_side_proxy:
+      architecture: "サーバー側が中継役（BFF / 音声ゲートウェイ）"
+      flow:
+        - "クライアント → WebRTC → サーバー: 音声ストリーム"
+        - "サーバー → Vapi (WebSocket): STT + LLM処理"
+        - "Vapi (WebSocket) → サーバー: 応答テキスト（ストリーミング）"
+        - "サーバー → Cartesia (WebSocket): テキスト → 音声（ストリーミングTTS, 速度制御あり）"
+        - "サーバー → WebRTC → クライアント: 音声ストリーム"
+    server_api_maintained:
+      endpoints:
+        - "POST /api/tools/memo (変更なし)"
+        - "POST /api/tools/location (変更なし)"
+        - "POST /api/simulate/* (変更なし)"
+        - "GET/PUT /api/cockpit/settings (変更なし)"
+        - "POST /api/cockpit/* (変更なし)"
+      note: "Function Callのルーティング先APIは完全維持"
+    goal: "クライアントはWebRTC接続のままで、サーバー側でVapi + Cartesiaに接続する"
+
+architecture:
+  voice_pipeline:
+    description: "音声パイプライン (Vapi + Cartesia, クライアントWebRTC維持)"
+    diagram: |
+      ┌─────────────────┐         WebRTC (保持)          ┌──────────────────┐
+      │   Browser       │◄──────────────────────────────►│   Server (BFF)   │
+      │   Client        │     (Media/Data Channel)        │  (Next.js)       │
+      │                 │                                │  - WebRTC Server │
+      │  - WebRTC RTC   │                                │  - Vapi WS Client│
+      │  - No SDK Change│                                │  - Cartesia WS   │
+      └─────────────────┘                                └────────┬─────────┘
+                                                                  │
+                                                                  │ WebSocket (最適)
+                                                                  ▼
+                                                         ┌──────────────────┐
+                                                         │     Vapi         │
+                                                         │   Platform       │
+                                                         │  (STT + LLM)     │
+                                                         │  - Streaming     │
+                                                         └────────┬─────────┘
+                                                                  │
+                                                                  │ Text (Streaming)
+                                                                  ▼
+                                                         ┌──────────────────┐
+                                                         │   Cartesia       │
+                                                         │   WebSocket  │
+                                                         │  - Sonic Model   │
+                                                         │  - Speed Control │
+                                                         │  - Custom Voice  │
+                                                         │  - Streaming TTS │
+                                                         └──────────────────┘
+
+    server_processing_flow:
+      - step: 1
+        from: "Client"
+        to: "Server"
+        protocol: "WebRTC Audio"
+        description: "音声ストリーム受信"
+      - step: 2
+        from: "Server"
+        to: "Vapi"
+        protocol: "WebSocket (最適)"
+        description: "STT + LLM処理（ストリーミング）"
+      - step: 3
+        from: "Vapi"
+        to: "Server"
+        protocol: "WebSocket (最適)"
+        description: "応答テキスト返却（ストリーミング）"
+      - step: 4
+        from: "Server"
+        to: "Cartesia"
+        protocol: "WebSocket (最適)"
+        description: "TTS合成（速度制御・カスタムボイス、ストリーミング）"
+      - step: 5
+        from: "Server"
+        to: "Client"
+        protocol: "WebRTC Audio"
+        description: "音声ストリーム送信"
+
+  session_flow:
+    steps:
+      - step: 1
+        action: "Client → POST /api/session → Server"
+      - step: 2
+        action: "Server: WebRTCセッション準備（SDP Offer生成）"
+      - step: 3
+        action: "Server → Vapi WebSocket接続確立"
+      - step: 4
+        action: "Server → Cartesia WebSocket接続確立"
+      - step: 5
+        action: "Server → { sessionId, sdpAnswer, serverConfig } → Client"
+      - step: 6
+        action: "Client: WebRTC接続確立（SDP Answer使用）"
+      - step: 7
+        action: "Start Conversation: 双方向音声ストリーム通信"
+      - step: 8
+        action: "Function Call: Vapi → /api/tools/* 経由でルーティング"
+
+api_endpoints:
+  session_and_voice:
+    - method: POST
+      endpoint: /api/session
+      description: "セッション作成"
+      request:
+        apiKey: string (optional)
+        config:
+          model: string (default: "gpt-4o")
+          voice: string (default: "cartesia-custom")
+          speed: number (default: 1.0, range: 0.5-2.0)
+      response:
+        sessionId: string
+        authToken: string
+        vapiConfig: object
+          - publicKey: string
+          - assistantId: string
+
+  memory_and_tools:
+    - method: POST
+      endpoint: /api/tools/memo
+      description: "明示的メモ保存（ユーザー記憶スロット更新）"
+    - method: POST
+      endpoint: /api/tools/location
+      description: "位置情報から近くのPOI説明を生成（クールタイムあり）"
+
+  simulation_and_management:
+    - method: POST
+      endpoint: /api/simulate/location
+      description: "位置シミュレーション（デバッグ用）"
+    - method: POST
+      endpoint: /api/simulate/notification
+      description: "通知シミュレーション"
+    - method: GET
+      endpoint: /api/cockpit/settings
+      description: "ユーザー設定取得"
+    - method: PUT
+      endpoint: /api/cockpit/settings
+      description: "ユーザー設定更新"
+    - method: POST
+      endpoint: /api/cockpit/enroll
+      description: "声紋登録"
+    - method: GET
+      endpoint: /api/cockpit/users
+      description: "ユーザー一覧"
+    - method: POST
+      endpoint: /api/cockpit/select
+      description: "ユーザー選択"
+
+  function_call_routing:
+    description: "Vapi Function Call → サーバーAPIルーティング"
+    flow:
+      - from: "Vapi (WebSocket)"
+        format: "{ name: string, arguments: object }"
+      - to: "Server"
+        action: "Function Callイベント受信"
+      - to: "POST /api/tools/{name}"
+        body: "argumentsをそのまま転送"
+      - from: "/api/tools/{name}"
+        format: "レスポンスJSON"
+      - to: "Server → Vapi"
+        action: "Function Call結果を返却"
+
+ui_simulator:
+  description: "Webブラウザ用デバッグシミュレーター（iOS/Meta Glassの代替）"
+  purpose: "Webブラウザでは再現できないPush通知・位置情報を擬似的に送信"
+  note: "本番クライアント（iOS/Meta Glass）は座標を直接送信、シミュレーターのみジオコーディング使用"
+
+  location_simulator:
+    endpoint: "POST /api/simulate/location"
+    ui_fields:
+      - name: "place_name"
+        type: "string"
+        input_type: "text"
+        placeholder: "場所名（例: 東京駅, 新宿駅, 渋谷スクランブル交差点）"
+      - name: "cool_time"
+        type: "number"
+        input_type: "text"
+        optional: true
+        placeholder: "クールタイム(ms) - 空欄でユーザー設定使用"
+      - name: "radius"
+        type: "number"
+        input_type: "text"
+        optional: true
+        placeholder: "検索半径(m) - 空欄でユーザー設定使用"
+    action_button: "位置情報を送信"
+    client_side_processing:
+      - "クライアント側で Google Maps Geocoding API を呼び出し"
+      - "place_name（例: 東京駅）→ 緯度経度に変換"
+      - "変換後の座標を /api/simulate/location に送信"
+
+  notification_simulator:
+    endpoint: "POST /api/simulate/notification"
+    ui_fields:
+      - name: "app_name"
+        type: "string"
+        input_type: "text"
+        placeholder: "アプリ名（例: LINE, Gmail）"
+      - name: "title"
+        type: "string"
+        input_type: "text"
+        placeholder: "通知タイトル"
+      - name: "body"
+        type: "string"
+        input_type: "textarea"
+        placeholder: "通知本文"
+      - name: "thread_id"
+        type: "string"
+        input_type: "text"
+        optional: true
+        placeholder: "スレッドID（オプション）"
+    action_button: "通知を送信"
+
+  note: "UIは開発者用管理画面レベルで十分（単純な入力フォーム）"
+
+memory_system:
+  fixed_slots:
+    description: "固定スロット方式"
+    slots_per_user: 10
+    max_characters: 200
+
+  database_schema:
+    user_memory_slots:
+      columns:
+        - name: id
+          type: UUID
+          description: "Primary Key"
+        - name: user_id
+          type: UUID
+          description: "FK → user_profiles.id"
+        - name: slot_number
+          type: INTEGER
+          description: "1-10"
+        - name: content
+          type: TEXT
+          description: "最大200文字"
+        - name: updated_at
+          type: TIMESTAMP
+          description: "自動更新"
+      constraints:
+        - "UNIQUE(user_id, slot_number)"
+
+  logic:
+    load: "セッション開始時に全スロット取得 → System Promptに注入"
+    update: "LLMツール経由で特定スロットをUPSERT"
+    delete: "contentを空文字でクリア"
+
+database:
+  user_profiles:
+    columns:
+      - name: id
+        type: UUID
+        description: "Primary Key"
+      - name: name
+        type: TEXT
+        description: "ユーザー識別名"
+      - name: voice_profile_blob
+        type: TEXT
+        description: "Base64声紋データ"
+      - name: location_cool_time
+        type: INTEGER
+        description: "位置情報クールタイム(ms), デフォルト: 1800000 (30分)"
+      - name: location_search_radius
+        type: INTEGER
+        description: "位置情報検索半径(m), デフォルト: 100"
+      - name: notification_tts_enabled
+        type: BOOLEAN
+        description: "通知TTS有効/無効, デフォルト: true"
+      - name: notification_tts_max_length
+        type: INTEGER
+        description: "通知TTS最大文字数, デフォルト: 200"
+      - name: notification_tts_include_title
+        type: BOOLEAN
+        description: "タイトルを読み上げるか, デフォルト: true"
+      - name: notification_tts_include_body
+        type: BOOLEAN
+        description: "本文を読み上げるか, デフォルト: true"
+      - name: created_at
+        type: TIMESTAMP
+        description: "作成日時"
+
+  user_poi_notifications:
+    description: "位置情報POI通知履歴（クールタイム管理用）"
+    columns:
+      - name: id
+        type: UUID
+        description: "Primary Key"
+      - name: user_id
+        type: UUID
+        description: "FK → user_profiles.id"
+      - name: poi_id
+        type: TEXT
+        description: "Google Places place_id"
+      - name: poi_name
+        type: TEXT
+        description: "POI名（例: 東京駅）"
+      - name: notified_at
+        type: TIMESTAMP
+        description: "通知時刻"
+      - name: latitude
+        type: REAL
+        description: "通知時の緯度"
+      - name: longitude
+        type: REAL
+        description: "通知時の経度"
+    indexes:
+      - "idx_user_poi (user_id, poi_id, notified_at)"
+
+tech_stack:
+  framework:
+    name: Next.js
+    version: "16"
+    router: App Router
+    purpose: SSR, API Routes
+
+  language:
+    name: TypeScript
+    version: "5.x"
+    purpose: 型安全性
+
+  ui:
+    - React 19
+    - Tailwind CSS
+    purpose: デバッグUI
+
+  voice_ai_server:
+    webrtc:
+      library: "node-webrtc / aiortc (Python) / custom"
+      purpose: "クライアントとのWebRTC接続"
+    stt_llm:
+      provider: Vapi
+      integration: "WebSocket (WebRTC非対応)"
+      llm: OpenAI  # 使用するLLM
+      note: "HTTP APIは開発・管理用、WebSocketがリアルタイム通話用"
+      purpose: "STT + LLM + Function Calling (ストリーミング)"
+      audio_format:
+        from_client: "Opusコーデック / 16kHz（WebRTC標準）"
+        to_vapi: "Base64エンコード / mu-law 8kHz（Vapi要件）"
+    tts:
+      provider: Cartesia
+      model: Sonic
+      integration: "WebSocket (最適)"
+      note: "HTTP APIはバッチ用、WebSocketがストリーミングTTS用"
+      features:
+        - 音声速度変更 (0.5x - 2.0x)
+        - カスタムボイス
+        - 低レイテンシ (ストリーミング)
+
+  client:
+    protocol: WebRTC
+    note: "クライアント側はWebRTC接続のままで変更最小限"
+
+  database:
+    provider: Supabase
+    engine: PostgreSQL
+    tables:
+      - user_profiles
+      - user_memory_slots
+      - user_poi_notifications
+
+  external_apis:
+    - Google Maps (Places API / Geocoding API)
+
+  deployment:
+    platform: Cloud Run
+    type: Serverless container
+
+voice_features:
+  speed_control:
+    description: "音声速度変更"
+    range:
+      min: 0.5
+      max: 2.0
+      default: 1.0
+    api_parameter: speed
+    implementation: "Cartesia TTS APIのspeedパラメータ"
+
+  custom_voice:
+    description: "カスタムボイス"
+    provider: Cartesia
+    implementation: "Cartesia Voice Embedding / Custom Voice"
+    configuration:
+      voice_id: string
+      embedding: optional
+
+  latency_target:
+    target: "< 800ms (E2E, サーバー経由)"
+    note: "Vapiのストリーミング応答時間は実測ベースで要検証"
+    breakdown:
+      - "Client ↔ Server (WebRTC): 20-50ms"
+      - "Server ↔ Vapi (WebSocket): 300-500ms (STT+LLM)"
+      - "Server ↔ Cartesia (WebSocket): 50-150ms (TTS)"
+      - "Server processing: 10-30ms"
+    optimization:
+      - "Vapi WebSocketストリーミング（HTTP APIより50-100ms高速）"
+      - "Cartesia WebSocketストリーミングTTS（HTTP APIより100-200ms高速）"
+      - "低遅延コーデック（Opus）"
+      - "フレームサイズ短縮"
+
+location_features:
+  description: "位置情報から近くのPOI説明を生成"
+  api:
+    provider: Google Maps
+    services:
+      - Places API (Nearby Search)
+      - Geocoding API (fallback)
+  llm: OpenAI  # 説明文生成に使用するLLM
+  processing_flow:
+    - "クライアントから座標を受信"
+    - "Places APIで近くのPOI検索（radius設定可能）"
+    - "OpenAI LLMでPOI説明文生成（1文、50文字以内）"
+    - "Cartesia TTSで音声生成"
+    - "通知履歴を記録（クールタイム管理）"
+    - "クライアントに説明文 + 音声を返却"
+  cool_down:
+    description: "クールタイム機能"
+    mechanism: "同一POIに対して設定時間内は再通知しない"
+    storage: "user_poi_notifications テーブル"
+    settings:
+      user_configurable:
+        - location_cool_time: "クールタイム(ms), デフォルト: 1800000 (30分)"
+        - location_search_radius: "検索半径(m), デフォルト: 100"
+      ui: "管理画面（/api/cockpit/settings）で設定可能"
+  api_endpoint:
+    method: POST
+    endpoint: /api/tools/location
+    request:
+      latitude: number
+      longitude: number
+      cool_time?: number  # ユーザー設定を上書き
+      radius?: number     # ユーザー設定を上書き
+    response:
+      # クールタイム中
+      skipped: true
+      remaining_time: number
+      last_notification:
+        poi_name: string
+        notified_at: string
+      # 再生する場合
+      skipped: false
+      poi:
+        name: string
+        types: string[]
+      description: string
+      audio: string  # base64エンコードされた音声
+  note: "POIがない場合はスキップ（無理に生成しない）"
+
+push_notification_tts:
+  description: "Push通知テキスト読み上げ (TTS)"
+  trigger:
+    mode: "状況ベース"
+    conditions:
+      - condition: "会話中（AI発話中）"
+        action: "AI発話終了を待ってから読み上げ"
+      - condition: "会話中（ユーザー発話中）"
+        action: "ユーザー発話終了を待ってから読み上げ"
+      - condition: "アイドル時"
+        action: "即座に読み上げ"
+    user_configurable:
+      - name: "notification_tts_enabled"
+        type: "boolean"
+        default: true
+        description: "通知読み上げのオン/オフ"
+      - name: "notification_tts_max_length"
+        type: "integer"
+        default: 200
+        description: "読み上げ最大文字数"
+      - name: "notification_tts_include_title"
+        type: "boolean"
+        default: true
+        description: "タイトルを読み上げるか"
+      - name: "notification_tts_include_body"
+        type: "boolean"
+        default: true
+        description: "本文を読み上げるか"
+    ui: "管理画面（/api/cockpit/settings）で設定可能"
+
+  protocol:
+    transport: "WebRTC Data Channel（既存セッション経由）"
+    direction: "Client → Server"
+
+  request_format:
+    app_name:
+      type: "string"
+      description: "アプリ名（例: LINE, Gmail）"
+    title:
+      type: "string"
+      description: "通知タイトル"
+    body:
+      type: "string"
+      description: "通知本文"
+
+  tts_format:
+    template: "{app_name}から通知です。{title}。{body}"
+    overflow_handling: "最大文字数を超える場合は切り捨て + '続きはアプリで確認'"
+    emoji_handling: "削除"
+    url_handling: "削除"
+
+  voice_settings:
+    provider: "Cartesia"
+    voice: "custom_voice（ユーザー設定と同じ）"
+    speed: "1.0（ユーザー設定と同じ）"
+
+  privacy:
+    server_storage: "しない"
+    logging: "メタ情報のみ（通知内容はログに出力しない）"
+    retention: "即時破棄（メモリ上のみ）"
+
+priority_rules:
+  high:
+    - "サーバーサイドロジック（API, DB, Webhook）"
+    - "バックエンドロジックの包括的テスト"
+    - "API互換性維持"
+
+  medium:
+    - "Vapi + Cartesia連携実装"
+    - "音声速度制御実装"
+    - "カスタムボイス実装"
+
+  low:
+    - "UIデザイン（開発者用管理画面レベルでOK）"
+
+strict_rules:
+  - "Web固有のハック禁止: スリープ対策、WakeLock等に工数を使わない"
+  - "Client is Thin: クライアントにロジック（STT/LLM/TTS）を実装しない"
+  - "One API: 全クライアントが同一APIを利用する"
+  - "ブラウザForeground前提: 表示状態で検証する"
+  - "クライアントWebRTC維持: クライアントはWebRTC接続のままとする"
+  - "サーバー側中継: サーバーがWebRTC ↔ Vapi/Cartesia の中継を行う"
+  - "サーバー側API維持: /api/tools/* などFunction Callルーティング先は変更しない"
+
+migration_tasks:
+  server_side:
+    webRTC_server:
+      - "WebRTCサーバー実装（Node.js/Next.js）"
+      - "WebRTC ↔ オーディオストリーム処理"
+      - "Data Channel経由のイベント/Function Call転送"
+    vapi_integration:
+      - "Vapi SDK/HTTP API インテグレーション"
+      - "STT + LLM処理の連携"
+      - "Function Callルーティング（Vapi → /api/tools/*）"
+    cartesia_integration:
+      - "Cartesia TTS API 連携"
+      - "音声速度制御パラメータ実装（0.5x - 2.0x）"
+      - "カスタムボイス設定実装"
+    audio_pipeline:
+      - "Vapi応答テキスト → Cartesia TTS → WebRTC音声ストリーム"
+      - "低レイテンシ音声パイプライン構築"
+
+  client_side:
+    minimal_changes:
+      - "WebRTC接続ロジックは変更なし"
+      - "/api/session エンドポイントは維持"
+      - "既存のオーディオ処理ロジックを再利用"
+
+  compatibility:
+    api_changes:
+      session_endpoint:
+        note: "/api/sessionはエンドポイント維持"
+        old_response: "{ sessionId, clientSecret, model } (OpenAI Realtime)"
+        new_response: "{ sessionId, serverConfig } (独自実装)"
+    maintained:
+      - "WebRTC接続プロトコル（変更なし）"
+      - "Function Callルーティング先APIは完全維持 (/api/tools/*)"
+      - "ツール実装は一切変更なし"
+
+environment_variables:
+  public_safe:
+    - name: NEXT_PUBLIC_SUPABASE_URL
+      description: "Supabase URL"
+    - name: NEXT_PUBLIC_SUPABASE_ANON_KEY
+      description: "Supabase Anon Key (RLS保護)"
+    - name: NEXT_PUBLIC_APP_URL
+      description: "アプリURL"
+
+  server_only:
+    - name: SUPABASE_SERVICE_ROLE_KEY
+      description: "Supabase Service Role Key"
+    - name: VAPI_API_KEY
+      description: "Vapi API Key"
+    - name: VAPI_PUBLIC_KEY
+      description: "Vapi Public Key"
+    - name: CARTESIA_API_KEY
+      description: "Cartesia API Key"
+    - name: OPENAI_API_KEY
+      description: "OpenAI API Key (LLM用)"
+    - name: GOOGLE_MAPS_API_KEY
+      description: "Google Maps API Key (Places API / Geocoding API)"
