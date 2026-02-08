@@ -12,7 +12,10 @@
 
 import { createServer } from 'http';
 import { parse } from 'url';
+import type { IncomingMessage } from 'http';
 import { WebSocketServer } from 'ws';
+import type { WebSocket } from 'ws';
+import type { VapiConfig, CartesiaConfig } from './app/types';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
@@ -20,7 +23,7 @@ const port = process.env.PORT ? parseInt(process.env.PORT, 10) : (dev ? 3000 : 8
 
 // WebSocket server instance
 let wss: WebSocketServer | null = null;
-const connections = new Set<any>();
+const connections = new Set<WebSocket>();
 
 // Prepare Next.js app and start server
 async function startServer() {
@@ -61,7 +64,7 @@ async function startServer() {
         wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 
         // Connection handler
-        wss.on('connection', (ws: any, req: any) => {
+        wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           connections.add(ws);
 
           const clientIp = req.socket.remoteAddress;
@@ -88,13 +91,13 @@ async function startServer() {
               // Get or create session
               let sessionId = message.sessionId;
               if (!sessionId) {
-                const session = createWebRTCSession({ userId: 'anonymous' } as any);
+                const session = createWebRTCSession('anonymous', 'Default system prompt');
                 sessionId = session.sessionId;
               }
 
               // Create handler instance
-              const handler = new WebRTCWebSocketConnection(ws, sessionId, {} as any, {} as any);
-              await handler.start();
+              const handler = new WebRTCWebSocketConnection(sessionId, ws, {} as VapiConfig, {} as CartesiaConfig);
+              await handler.handle();
             } catch (err) {
               logError('Error handling WebSocket message', err instanceof Error ? err : { message: String(err) });
             }

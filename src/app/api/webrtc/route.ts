@@ -119,9 +119,8 @@ class WebRTCWebSocketConnection {
       });
 
       // Setup WebSocket close handler
-      // @ts-ignore
       this.ws.on('close', () => {
-        this?.handleClose();
+        this.handleClose();
       });
 
       // Setup WebSocket error handler

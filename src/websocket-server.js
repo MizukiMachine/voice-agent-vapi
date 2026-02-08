@@ -1,26 +1,24 @@
 /**
- * Simple WebSocket Server for WebRTC Signaling
+ * Simple WebSocket Server for WebRTC Signaling (JavaScript version)
  *
  * This is a standalone WebSocket server that runs alongside Next.js.
  * It handles WebRTC signaling and delegates actual message processing
  * to the Next.js API routes via HTTP requests.
  */
 
-import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
-import { parse } from 'url';
-import type { IncomingMessage } from 'http';
-import type { WebSocket } from 'ws';
+const http = require('http');
+const { WebSocketServer } = require('ws');
+const { URL } = require('url');
 
-const PORT = parseInt(process.env.WS_PORT || '3001', 10);
-const NEXTJS_URL = process.env.NEXTJS_URL || 'http://localhost:3000';
+const PORT = process.env.WS_PORT || 3001;
+const NEXTJS_URL = process.env.NEXTJS_URL || `http://localhost:${process.env.PORT || 8080}`;
 
 const wss = new WebSocketServer({ port: PORT });
 
 console.log(`WebSocket Server running on ws://localhost:${PORT}`);
 console.log(`Proxying to Next.js at ${NEXTJS_URL}`);
 
-wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+wss.on('connection', (ws, req) => {
   const clientIp = req.socket.remoteAddress;
   console.log(`WebSocket client connected: ${clientIp}`);
 
@@ -32,7 +30,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
   }));
 
   // Handle incoming messages
-  ws.on('message', async (data: Buffer) => {
+  ws.on('message', async (data) => {
     try {
       const message = JSON.parse(data.toString('utf8'));
       console.log('Received message:', message.type);
@@ -53,7 +51,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       console.error('Error handling message:', err);
       ws.send(JSON.stringify({
         type: 'error',
-        error: err instanceof Error ? err.message : String(err),
+        error: err.message || String(err),
       }));
     }
   });
@@ -64,13 +62,13 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
   });
 
   // Handle errors
-  ws.on('error', (error: Error) => {
+  ws.on('error', (error) => {
     console.error('WebSocket error:', error);
   });
 });
 
 // Handle server errors
-wss.on('error', (error: Error) => {
+wss.on('error', (error) => {
   console.error('WebSocket Server error:', error);
 });
 
