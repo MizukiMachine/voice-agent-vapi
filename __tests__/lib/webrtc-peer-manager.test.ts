@@ -265,7 +265,9 @@ a=rtpmap:111 opus/48000/2`;
       const transceiver = manager.addAudioTransceiver('sendrecv');
 
       expect(transceiver).toBeDefined();
-      expect(transceiver.mid).toBeDefined();
+      // mid is set after ICE gathering, check sender and receiver instead
+      expect(transceiver.sender).toBeDefined();
+      expect(transceiver.receiver).toBeDefined();
 
       const transceivers = manager.getTransceivers();
       expect(transceivers.length).toBeGreaterThan(0);

@@ -16,7 +16,6 @@ import {
   createDefaultIceServers,
   type WebRTCPeerManager,
   type WebRTCSessionEvents,
-  type RTCIceServer,
   type PeerConnectionConfig,
 } from './webrtc-peer-manager';
 

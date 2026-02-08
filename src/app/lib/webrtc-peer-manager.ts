@@ -120,6 +120,11 @@ export class WebRTCPeerManager {
     logger.debug('Creating SDP offer', { sessionId: this.sessionId });
 
     try {
+      // Add audio transceiver before creating offer to ensure audio media line is included
+      if (this.pc.getTransceivers().length === 0) {
+        this.addAudioTransceiver('sendrecv');
+      }
+
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
 

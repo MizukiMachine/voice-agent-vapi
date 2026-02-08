@@ -24,7 +24,6 @@
 import { NextRequest } from 'next/server';
 import { createServiceLogger } from '@/app/lib/logger';
 import {
-  getWebRTCSession,
   updateSessionStatus,
   closeWebRTCSession,
   createPeerConnection,
@@ -203,7 +202,7 @@ class WebRTCWebSocketConnection {
       this.sendFunctionCall(call);
     });
 
-    onAudio(this.sessionId, (audio, isFinal) => {
+    onAudio(this.sessionId, (audio, _isFinal) => {
       this.sendAudio(audio);
     });
 
@@ -355,10 +354,8 @@ class WebRTCWebSocketConnection {
     }
 
     try {
-      // Add audio transceiver before creating offer
-      peerManager.addAudioTransceiver('sendrecv');
-
       // Create SDP offer using werift
+      // Note: createOffer() will automatically add an audio transceiver if none exists
       const sdp = await peerManager.createOffer();
 
       this.sendMessage({
