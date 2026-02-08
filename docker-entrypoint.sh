@@ -1,18 +1,11 @@
 #!/bin/sh
 # Start script for Cloud Run
-# Starts both Next.js server and WebSocket server
+# Starts the Next.js server with integrated WebSocket support
 
 set -e
 
 echo "Starting Next.js server on port ${PORT:-8080}..."
-node /app/standalone/server.js &
+echo "WebSocket endpoint: ws://localhost:${PORT:-8080}/api/webrtc"
 
-echo "Starting WebSocket server on port ${WS_PORT:-3001}..."
-node /app/src/websocket-server.js &
-
-# Wait for any process to exit
-wait -n
-exit_code=$?
-
-echo "One of the processes exited with code $exit_code, shutting down..."
-exit $exit_code
+# Start the custom Next.js server (WebSocket support is integrated)
+exec node /app/standalone/server.js

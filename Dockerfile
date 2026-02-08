@@ -70,8 +70,6 @@ USER nextjs
 # Expose ports
 ENV PORT=8080
 ENV HOSTNAME="0.0.0.0"
-ENV WS_PORT=3001
-ENV NEXTJS_URL="http://localhost:8080"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
