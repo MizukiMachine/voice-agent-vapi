@@ -6,6 +6,7 @@
  */
 
 import { createServiceLogger } from './logger';
+import { convertToMulaw, AudioConversionError } from './audio-converter';
 import WebSocket from 'ws';
 
 const logger = createServiceLogger('vapi-client');
@@ -229,33 +230,47 @@ export class VapiClient {
   /**
    * Send audio data to Vapi
    * Converts Opus 16kHz to mu-law 8kHz as required by Vapi
+   *
+   * @param audioData - Raw audio buffer from WebRTC (Opus/PCM, 16kHz)
    */
-  sendAudio(audioData: Buffer): void {
+  async sendAudio(audioData: Buffer): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       logger.warn('Cannot send audio: WebSocket not connected');
       return;
     }
 
-    // Convert audio format (Opus 16kHz → mu-law 8kHz)
-    // This is a placeholder - actual conversion requires audio processing library
-    const convertedAudio = this.convertAudioFormat(audioData);
+    try {
+      // Convert audio format (Opus/PCM 16kHz → mu-law 8kHz)
+      const conversionResult = await convertToMulaw(audioData, {
+        inputSampleRate: 16000,
+        outputSampleRate: 8000,
+        channels: 1,
+      });
 
-    const message = {
-      type: 'audio',
-      audio: convertedAudio.toString('base64'),
-    };
+      logger.debug('Audio converted successfully', {
+        inputSize: audioData.length,
+        outputSize: conversionResult.buffer.length,
+        latency: conversionResult.latencyMs,
+      });
 
-    this.ws.send(JSON.stringify(message));
-  }
+      const message = {
+        type: 'audio',
+        audio: conversionResult.buffer.toString('base64'),
+      };
 
-  /**
-   * Convert audio format
-   * TODO: Implement proper Opus → mu-law conversion
-   */
-  private convertAudioFormat(audioData: Buffer): Buffer {
-    // Placeholder: just return the original data
-    // In production, use audio processing library like node-ffmpeg or similar
-    return audioData;
+      this.ws.send(JSON.stringify(message));
+    } catch (error) {
+      logger.error(
+        'Failed to convert audio for Vapi',
+        error instanceof Error ? error : { message: String(error) }
+      );
+
+      if (error instanceof AudioConversionError) {
+        this.onErrorHandlers.forEach((handler) =>
+          handler('audio_conversion_error', error.message)
+        );
+      }
+    }
   }
 
   /**
