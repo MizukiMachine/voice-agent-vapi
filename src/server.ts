@@ -12,7 +12,10 @@
 
 import { createServer } from 'http';
 import { parse } from 'url';
+import type { IncomingMessage } from 'http';
 import { WebSocketServer } from 'ws';
+import type { WebSocket } from 'ws';
+import { loadVapiConfig, loadCartesiaConfig, getConfigSummary } from './app/lib/config';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
@@ -20,7 +23,7 @@ const port = process.env.PORT ? parseInt(process.env.PORT, 10) : (dev ? 3000 : 8
 
 // WebSocket server instance
 let wss: WebSocketServer | null = null;
-const connections = new Set<any>();
+const connections = new Set<WebSocket>();
 
 // Prepare Next.js app and start server
 async function startServer() {
@@ -61,7 +64,7 @@ async function startServer() {
         wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 
         // Connection handler
-        wss.on('connection', (ws: any, req: any) => {
+        wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           connections.add(ws);
 
           const clientIp = req.socket.remoteAddress;
@@ -88,13 +91,17 @@ async function startServer() {
               // Get or create session
               let sessionId = message.sessionId;
               if (!sessionId) {
-                const session = createWebRTCSession({ userId: 'anonymous' } as any);
+                const session = createWebRTCSession('anonymous', 'Default system prompt');
                 sessionId = session.sessionId;
               }
 
-              // Create handler instance
-              const handler = new WebRTCWebSocketConnection(ws, sessionId, {} as any, {} as any);
-              await handler.start();
+              // Load configuration (throws if missing required env vars)
+              const vapiConfig = loadVapiConfig();
+              const cartesiaConfig = loadCartesiaConfig();
+
+              // Create handler instance with proper configuration
+              const handler = new WebRTCWebSocketConnection(sessionId, ws, vapiConfig, cartesiaConfig);
+              await handler.handle();
             } catch (err) {
               logError('Error handling WebSocket message', err instanceof Error ? err : { message: String(err) });
             }
@@ -141,6 +148,23 @@ async function startServer() {
   server.listen(port, () => {
     logInfo(`> Ready on http://${hostname}:${port}`);
     logInfo('> WebSocket endpoint: ws://' + hostname + ':' + port + '/api/webrtc');
+
+    // Log configuration status (without exposing secrets)
+    const configSummary = getConfigSummary();
+    if (configSummary.vapi.configured && configSummary.cartesia.configured) {
+      logInfo('> Configuration loaded successfully', {
+        vapi: { assistant: configSummary.vapi.hasAssistant },
+        cartesia: {
+          voiceId: configSummary.cartesia.voiceId,
+          speed: configSummary.cartesia.speed,
+        },
+      });
+    } else {
+      logWarn('> Some configuration is missing', {
+        vapiConfigured: configSummary.vapi.configured,
+        cartesiaConfigured: configSummary.cartesia.configured,
+      });
+    }
   });
 
   // Graceful shutdown

@@ -178,7 +178,7 @@ describe('POST /api/tools/location', () => {
 
       const request = createMockRequest('POST', body);
       const response = await POST(request);
-      const responseBody = await parseResponse<{ error: { code: string } }>(response);
+      const responseBody = await parseResponse<{ error: { code: string; message: string } }>(response);
 
       expect(response.status).toBe(400);
       assertErrorResponse(responseBody, 'INVALID_REQUEST');
@@ -258,7 +258,7 @@ describe('POST /api/tools/location', () => {
 
       const request = createMockRequest('POST', body);
       const response = await POST(request);
-      const responseBody = await parseResponse<{ error: { code: string } }>(response);
+      const responseBody = await parseResponse<{ error: { code: string; message: string } }>(response);
 
       expect(response.status).toBe(500);
       assertErrorResponse(responseBody, 'INTERNAL_ERROR');

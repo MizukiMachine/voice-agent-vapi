@@ -13,18 +13,21 @@ import {
 // Mock Supabase
 jest.mock('@/app/lib/supabase', () => ({
   saveUserMemory: jest.fn(),
+  getUserMemorySlots: jest.fn(),
   isSupabaseConfigured: jest.fn(),
 }));
 
-import { saveUserMemory, isSupabaseConfigured } from '@/app/lib/supabase';
+import { saveUserMemory, getUserMemorySlots, isSupabaseConfigured } from '@/app/lib/supabase';
 
 const mockSaveUserMemory = saveUserMemory as jest.Mock;
+const mockGetUserMemorySlots = getUserMemorySlots as jest.Mock;
 const mockIsSupabaseConfigured = isSupabaseConfigured as jest.Mock;
 
 describe('POST /api/tools/memo', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockIsSupabaseConfigured.mockReturnValue(true);
+    mockGetUserMemorySlots.mockResolvedValue([]);
   });
 
   describe('Success cases', () => {
@@ -98,7 +101,7 @@ describe('POST /api/tools/memo', () => {
 
       const request = createMockRequest('POST', body);
       const response = await POST(request);
-      const responseBody = await parseResponse<{ error: { code: string } }>(response);
+      const responseBody = await parseResponse<{ error: { code: string; message: string } }>(response);
 
       expect(response.status).toBe(400);
       assertErrorResponse(responseBody, 'INVALID_REQUEST');
@@ -148,7 +151,7 @@ describe('POST /api/tools/memo', () => {
 
       const request = createMockRequest('POST', body);
       const response = await POST(request);
-      const responseBody = await parseResponse<{ error: { code: string } }>(response);
+      const responseBody = await parseResponse<{ error: { code: string; message: string } }>(response);
 
       expect(response.status).toBe(500);
       assertErrorResponse(responseBody, 'SUPABASE_ERROR');
@@ -166,7 +169,7 @@ describe('POST /api/tools/memo', () => {
 
       const request = createMockRequest('POST', body);
       const response = await POST(request);
-      const responseBody = await parseResponse<{ error: { code: string } }>(response);
+      const responseBody = await parseResponse<{ error: { code: string; message: string } }>(response);
 
       expect(response.status).toBe(500);
       assertErrorResponse(responseBody, 'INTERNAL_ERROR');
