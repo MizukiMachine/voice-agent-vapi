@@ -316,5 +316,3 @@ export function generateIceServers(customServers?: RTCIceServer[]): RTCIceServer
 // ============================================================
 // Re-exports for convenience
 // ============================================================
-
-export { WebRTCSession };

@@ -384,12 +384,3 @@ export function createVapiClient(config: VapiConfig): VapiClient {
 // ============================================================
 // Re-exports
 // ============================================================
-
-export type {
-  VapiConfig,
-  VapiMessage,
-  VapiFunctionCallMessage,
-  VapiTextMessage,
-  VapiTranscriptMessage,
-  VapiErrorMessage,
-};

@@ -7,27 +7,33 @@
  *
  * Architecture:
  * - HTTP requests → Next.js App Router (default handler)
- * - WebSocket upgrades → Custom WebSocket handler
+ * - WebSocket upgrades → WebSocket Server (ws)
  */
 
 import { createServer } from 'http';
 import { parse } from 'url';
-import next from 'next';
-import { logDebug, logInfo, logWarn, logError } from './app/lib/logger';
-import { getOrCreateWSS, setMessageHandler } from './app/lib/wss-manager';
-import { createWebSocketSession, generateSessionId } from './app/lib/webrtc-websocket-handler';
-import type { WebSocket } from 'ws';
+import { WebSocketServer } from 'ws';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : (dev ? 3000 : 8080);
 
-// Create Next.js app
-const app = next({ dev, hostname, port });
-const handle = app.getRequestHandler();
+// WebSocket server instance
+let wss: WebSocketServer | null = null;
+const connections = new Set<any>();
 
 // Prepare Next.js app and start server
-app.prepare().then(() => {
+async function startServer() {
+  // Dynamically import Next.js to avoid AsyncLocalStorage issues
+  const next = (await import('next')).default;
+  const { logInfo, logWarn, logError } = await import('./app/lib/logger');
+
+  // Create Next.js app
+  const app = next({ dev, hostname, port });
+  const handle = app.getRequestHandler();
+
+  await app.prepare();
+
   const server = createServer(async (req, res) => {
     try {
       // Parse URL
@@ -50,48 +56,73 @@ app.prepare().then(() => {
     if (pathname === '/api/webrtc') {
       logInfo('WebSocket upgrade request', { path: pathname });
 
-      const wss = getOrCreateWSS(server);
+      // Create WebSocket server if not exists
+      if (!wss) {
+        wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 
-      // Set custom message handler for WebRTC
-      setMessageHandler((ws: WebSocket, data: Buffer, isBinary: boolean) => {
-        try {
-          // Parse incoming message
-          const message = JSON.parse(data.toString('utf8'));
-          const { type, sessionId } = message;
+        // Connection handler
+        wss.on('connection', (ws: any, req: any) => {
+          connections.add(ws);
 
-          // Create or retrieve session
-          let handler;
-          if (sessionId && typeof sessionId === 'string') {
-            // Look for existing session
-            const existingSession = (global as any).__wsSessions?.get(sessionId);
-            if (existingSession) {
-              handler = existingSession;
-            } else {
-              // Create new session
-              handler = createWebSocketSession(ws, sessionId);
-              if (!(global as any).__wsSessions) {
-                (global as any).__wsSessions = new Map();
+          const clientIp = req.socket.remoteAddress;
+          logInfo('WebSocket client connected', {
+            clientIp,
+            connectionCount: connections.size,
+          });
+
+          // Send welcome message
+          ws.send(JSON.stringify({
+            type: 'connected',
+            message: 'WebSocket connection established',
+          }));
+
+          // Handle messages (delegate to route handler)
+          ws.on('message', async (data: Buffer) => {
+            try {
+              // Import the WebSocket handler dynamically
+              const { WebRTCWebSocketConnection } = await import('./app/api/webrtc/route');
+              const { createWebRTCSession } = await import('./app/lib/webrtc-session-manager');
+
+              const message = JSON.parse(data.toString('utf8'));
+
+              // Get or create session
+              let sessionId = message.sessionId;
+              if (!sessionId) {
+                const session = createWebRTCSession({ userId: 'anonymous' } as any);
+                sessionId = session.sessionId;
               }
-              (global as any).__wsSessions.set(sessionId, handler);
-            }
-          } else {
-            // Generate new session ID
-            const newSessionId = generateSessionId();
-            handler = createWebSocketSession(ws, newSessionId);
-            if (!(global as any).__wsSessions) {
-              (global as any).__wsSessions = new Map();
-            }
-            (global as any).__wsSessions.set(newSessionId, handler);
-          }
 
-          logDebug('WebSocket message handled', { type });
-        } catch (err) {
-          logError('Error handling WebSocket message', err instanceof Error ? err : { message: String(err) });
-        }
-      });
+              // Create handler instance
+              const handler = new WebRTCWebSocketConnection(ws, sessionId, {} as any, {} as any);
+              await handler.start();
+            } catch (err) {
+              logError('Error handling WebSocket message', err instanceof Error ? err : { message: String(err) });
+            }
+          });
+
+          // Handle close
+          ws.on('close', () => {
+            connections.delete(ws);
+            logInfo('WebSocket client disconnected', {
+              clientIp,
+              connectionCount: connections.size,
+            });
+          });
+
+          // Handle errors
+          ws.on('error', (error: Error) => {
+            logError('WebSocket error', error, { clientIp });
+            connections.delete(ws);
+          });
+        });
+
+        wss.on('error', (error: Error) => {
+          logError('WebSocket Server error', error);
+        });
+      }
 
       wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
+        wss!.emit('connection', ws, request);
       });
     } else {
       // Reject other WebSocket upgrade paths
@@ -116,9 +147,21 @@ app.prepare().then(() => {
   const shutdown = async () => {
     logInfo('Shutting down server...');
 
-    // Close WebSocket server
-    const { closeWSS } = require('./app/lib/wss-manager');
-    await closeWSS();
+    // Close WebSocket connections
+    for (const ws of connections) {
+      ws.close(1001, 'Server shutting down');
+    }
+    connections.clear();
+
+    if (wss) {
+      await new Promise<void>((resolve) => {
+        wss!.close(() => {
+          logInfo('WebSocket Server closed');
+          wss = null;
+          resolve();
+        });
+      });
+    }
 
     // Close HTTP server
     server.close(() => {
@@ -135,4 +178,9 @@ app.prepare().then(() => {
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

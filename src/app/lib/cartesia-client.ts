@@ -124,17 +124,16 @@ export class CartesiaClient {
             const message = JSON.parse(data.toString()) as CartesiaMessage;
             this.handleMessage(message);
           } catch (error) {
-            logger.error('Failed to parse Cartesia message', {
-              message: error instanceof Error ? error.message : String(error),
-            });
+            logger.error(
+              'Failed to parse Cartesia message',
+              error instanceof Error ? error : { message: String(error) }
+            );
           }
         });
 
         // Error occurred
         this.ws.on('error', (error) => {
-          logger.error('Cartesia WebSocket error', {
-            message: error.message,
-          });
+          logger.error('Cartesia WebSocket error', error);
           this.onErrorHandlers.forEach((handler) =>
             handler('websocket_error', error.message)
           );
@@ -155,9 +154,10 @@ export class CartesiaClient {
           }
         });
       } catch (error) {
-        logger.error('Failed to create Cartesia WebSocket connection', {
-          message: error instanceof Error ? error.message : String(error),
-        });
+        logger.error(
+          'Failed to create Cartesia WebSocket connection',
+          error instanceof Error ? error : { message: String(error) }
+        );
         reject(error);
       }
     });
@@ -168,7 +168,7 @@ export class CartesiaClient {
    */
   private handleMessage(message: CartesiaMessage): void {
     if ('type' in message && message.type === 'error') {
-      logger.error('Cartesia error', { error: message.error, detail: message.detail });
+      logger.error('Cartesia error', { message: message.error }, { detail: message.detail });
       this.onErrorHandlers.forEach((handler) =>
         handler(message.error, message.detail)
       );
@@ -268,9 +268,10 @@ export class CartesiaClient {
 
     setTimeout(() => {
       this.connect().catch((error) => {
-        logger.error('Reconnect failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
+        logger.error(
+          'Reconnect failed',
+          error instanceof Error ? error : { message: String(error) }
+        );
       });
     }, delay);
   }
@@ -363,5 +364,3 @@ export function getVoiceIdByName(name: string): string | undefined {
 // ============================================================
 // Re-exports
 // ============================================================
-
-export type { CartesiaConfig, CartesiaTTSRequest, CartesiaTTSResponse, CartesiaErrorMessage };

@@ -24,6 +24,7 @@
 import { NextRequest } from 'next/server';
 import { createServiceLogger } from '@/app/lib/logger';
 import {
+  getWebRTCSession,
   updateSessionStatus,
   closeWebRTCSession,
 } from '@/app/lib/webrtc-session-manager';
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
  * This is a placeholder showing how the WebSocket should be handled
  * when integrated with a custom server or API route handler.
  */
-export class WebRTCWebSocketHandler {
+class WebRTCWebSocketConnection {
   private sessionId: string;
   private ws: WebSocket;
   private vapiConfig: VapiConfig;
@@ -118,27 +119,25 @@ export class WebRTCWebSocketHandler {
       });
 
       // Setup WebSocket close handler
-      // @ts-ignore - ws library type compatibility with Next.js (will be fixed in Issue #12)
+      // @ts-ignore
       this.ws.on('close', () => {
-        this handleClose();
+        this?.handleClose();
       });
 
       // Setup WebSocket error handler
       this.ws.on('error', (error: ErrorEvent) => {
-        logger.error('WebSocket error', {
-          sessionId: this.sessionId,
-          error: error.message,
-        });
+        logger.error('WebSocket error', { message: error.message }, { sessionId: this.sessionId });
       });
 
       // Send initial SDP offer
       this.sendSDPOffer();
 
     } catch (error) {
-      logger.error('Failed to start audio gateway', {
-        sessionId: this.sessionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logger.error(
+        'Failed to start audio gateway',
+        error instanceof Error ? error : { message: String(error) },
+        { sessionId: this.sessionId }
+      );
       this.sendError('gateway_start_failed');
       this.ws.close();
     }
@@ -196,10 +195,11 @@ export class WebRTCWebSocketHandler {
           });
       }
     } catch (error) {
-      logger.error('Failed to handle WebSocket message', {
-        sessionId: this.sessionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logger.error(
+        'Failed to handle WebSocket message',
+        error instanceof Error ? error : { message: String(error) },
+        { sessionId: this.sessionId }
+      );
     }
   }
 
@@ -261,7 +261,7 @@ export class WebRTCWebSocketHandler {
     // SDP offer should be retrieved from the session
     const session = getWebRTCSession(this.sessionId);
     if (!session) {
-      logger.error('Session not found for SDP offer', { sessionId: this.sessionId });
+      logger.error('Session not found for SDP offer', undefined, { sessionId: this.sessionId });
       return;
     }
 
@@ -323,4 +323,4 @@ export class WebRTCWebSocketHandler {
 // Re-exports
 // ============================================================
 
-export { WebRTCWebSocketHandler };
+export { WebRTCWebSocketConnection };

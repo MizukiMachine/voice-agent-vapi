@@ -20,7 +20,7 @@ import {
   closeWebRTCSession,
   updateSessionStatus,
 } from './webrtc-session-manager';
-import type { VapiConfig, CartesiaConfig } from './types';
+import type { VapiConfig, CartesiaConfig } from '@/app/types';
 
 const logger = createServiceLogger('audio-gateway');
 
@@ -138,12 +138,12 @@ class GatewayStore {
 
     // Error handling
     vapiClient.onError((error, message) => {
-      logger.error('Vapi error', { sessionId, error, message });
+      logger.error('Vapi error', { message: error }, { sessionId, message });
       this.emitError(sessionId, 'vapi_error', error);
     });
 
     cartesiaClient.onError((error, detail) => {
-      logger.error('Cartesia error', { sessionId, error, detail });
+      logger.error('Cartesia error', { message: error }, { sessionId, detail });
       this.emitError(sessionId, 'cartesia_error', error);
     });
   }
@@ -327,5 +327,3 @@ export function unregisterCallbacks(sessionId: string): void {
 // ============================================================
 // Re-exports
 // ============================================================
-
-export type { GatewayConfig, GatewaySession };

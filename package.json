@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "dotenvx run --convention=nextjs -- next dev",
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "dev:next": "dotenvx run --convention=nextjs -- next dev",
     "dev:plain": "next dev",
-    "build": "dotenvx run --convention=nextjs -- next build",
+    "build": "next build",
     "build:plain": "next build",
-    "start": "dotenvx run --convention=nextjs -- next start",
+    "start": "NODE_ENV=production ts-node src/server.ts",
+    "start:next": "dotenvx run --convention=nextjs -- next start",
     "start:plain": "next start",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
@@ -36,6 +38,9 @@
   },
   "devDependencies": {
     "@dotenvx/dotenvx": "^1.52.0",
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.15.11",
+    "@swc/register": "^0.1.10",
     "@tailwindcss/postcss": "^4",
     "@types/jest": "^30.0.0",
     "@types/node": "^20",
@@ -47,10 +52,14 @@
     "eslint-config-prettier": "^10.1.8",
     "jest": "^30.2.0",
     "node-mocks-http": "^1.17.2",
+    "nodemon": "^3.1.11",
     "prettier": "^3.8.0",
     "supabase": "^2.76.1",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
