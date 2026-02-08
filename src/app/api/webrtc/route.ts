@@ -24,9 +24,11 @@
 import { NextRequest } from 'next/server';
 import { createServiceLogger } from '@/app/lib/logger';
 import {
-  getWebRTCSession,
   updateSessionStatus,
   closeWebRTCSession,
+  createPeerConnection,
+  getPeerConnection,
+  createDefaultIceServers,
 } from '@/app/lib/webrtc-session-manager';
 import {
   startAudioGateway,
@@ -39,6 +41,7 @@ import {
   unregisterCallbacks,
 } from '@/app/lib/audio-gateway';
 import { VapiConfig, CartesiaConfig } from '@/app/types';
+import { type RTCIceCandidateInit } from 'werift';
 import WebSocket from 'ws';
 
 const logger = createServiceLogger('webrtc-websocket');
@@ -113,6 +116,9 @@ class WebRTCWebSocketConnection {
       // Register callbacks for gateway events
       this.registerGatewayCallbacks();
 
+      // Create WebRTC peer connection
+      this.createPeerConnection();
+
       // Setup WebSocket message handler
       this.ws.on('message', (data: Buffer) => {
         this.handleMessage(data);
@@ -129,7 +135,7 @@ class WebRTCWebSocketConnection {
       });
 
       // Send initial SDP offer
-      this.sendSDPOffer();
+      await this.sendSDPOffer();
 
     } catch (error) {
       logger.error(
@@ -143,6 +149,52 @@ class WebRTCWebSocketConnection {
   }
 
   /**
+   * Create WebRTC peer connection
+   */
+  private createPeerConnection(): void {
+    logger.info('Creating WebRTC peer connection', { sessionId: this.sessionId });
+
+    createPeerConnection(
+      this.sessionId,
+      {
+        onIceCandidate: (candidate) => {
+          this.sendICECandidate(candidate);
+        },
+        onTrack: (track) => {
+          logger.info('Track received', {
+            sessionId: this.sessionId,
+            trackKind: track.kind,
+          });
+        },
+        onConnectionStateChange: (state) => {
+          logger.info('Connection state changed', {
+            sessionId: this.sessionId,
+            state,
+          });
+
+          // Update session status based on connection state
+          if (state === 'connected') {
+            updateSessionStatus(this.sessionId, 'connected');
+          } else if (state === 'disconnected' || state === 'failed') {
+            updateSessionStatus(this.sessionId, 'error');
+          }
+        },
+        onIceConnectionStateChange: (state) => {
+          logger.info('ICE connection state changed', {
+            sessionId: this.sessionId,
+            state,
+          });
+        },
+      },
+      {
+        iceServers: createDefaultIceServers(),
+        bundlePolicy: 'max-bundle',
+        iceTransportPolicy: 'all',
+      }
+    );
+  }
+
+  /**
    * Register callbacks for audio gateway events
    */
   private registerGatewayCallbacks(): void {
@@ -150,7 +202,7 @@ class WebRTCWebSocketConnection {
       this.sendFunctionCall(call);
     });
 
-    onAudio(this.sessionId, (audio, isFinal) => {
+    onAudio(this.sessionId, (audio, _isFinal) => {
       this.sendAudio(audio);
     });
 
@@ -205,21 +257,57 @@ class WebRTCWebSocketConnection {
   /**
    * Handle SDP answer from client
    */
-  private handleSDPAnswer(sdp: string): void {
-    logger.debug('SDP answer received', { sessionId: this.sessionId });
-    // In production, this would be used to complete the WebRTC connection
-    // For now, we'll just log it
+  private async handleSDPAnswer(sdp: string): Promise<void> {
+    logger.debug('SDP answer received', {
+      sessionId: this.sessionId,
+      sdpLength: sdp.length,
+    });
+
+    try {
+      const peerManager = getPeerConnection(this.sessionId);
+      if (!peerManager) {
+        throw new Error('Peer connection not found');
+      }
+
+      await peerManager.setRemoteAnswer(sdp);
+
+      logger.info('Remote SDP answer set successfully', {
+        sessionId: this.sessionId,
+      });
+    } catch (error) {
+      logger.error(
+        'Failed to set remote SDP answer',
+        error instanceof Error ? error : { message: String(error) },
+        { sessionId: this.sessionId }
+      );
+      this.sendError('sdp_answer_failed');
+    }
   }
 
   /**
    * Handle ICE candidate from client
    */
-  private handleICECandidate(candidate: RTCIceCandidateInit): void {
+  private async handleICECandidate(candidate: RTCIceCandidateInit): Promise<void> {
     logger.debug('ICE candidate received', {
       sessionId: this.sessionId,
       candidate: candidate.candidate?.substring(0, 50),
     });
-    // In production, this would be added to the RTCPeerConnection
+
+    try {
+      const peerManager = getPeerConnection(this.sessionId);
+      if (!peerManager) {
+        throw new Error('Peer connection not found');
+      }
+
+      await peerManager.addIceCandidate(candidate);
+    } catch (error) {
+      logger.error(
+        'Failed to add ICE candidate',
+        error instanceof Error ? error : { message: String(error) },
+        { sessionId: this.sessionId }
+      );
+      // Don't send error for ICE candidate failures, they're non-fatal
+    }
   }
 
   /**
@@ -240,7 +328,7 @@ class WebRTCWebSocketConnection {
   /**
    * Handle WebSocket close
    */
-  private handleClose(): void {
+  private async handleClose(): Promise<void> {
     logger.info('WebSocket connection closed', { sessionId: this.sessionId });
 
     // Unregister callbacks
@@ -249,27 +337,44 @@ class WebRTCWebSocketConnection {
     // Stop audio gateway
     stopAudioGateway(this.sessionId);
 
-    // Update session status
-    updateSessionStatus(this.sessionId, 'disconnected');
+    // Close peer connection (this will also close the WebRTC session)
+    await closeWebRTCSession(this.sessionId);
   }
 
   /**
    * Send SDP offer to client
    */
-  private sendSDPOffer(): void {
-    // SDP offer should be retrieved from the session
-    const session = getWebRTCSession(this.sessionId);
-    if (!session) {
-      logger.error('Session not found for SDP offer', undefined, { sessionId: this.sessionId });
+  private async sendSDPOffer(): Promise<void> {
+    const peerManager = getPeerConnection(this.sessionId);
+    if (!peerManager) {
+      logger.error('Peer connection not found for SDP offer', undefined, {
+        sessionId: this.sessionId,
+      });
       return;
     }
 
-    // In production, the SDP offer would be generated using the WebRTC library
-    // For now, we'll send a placeholder
-    this.sendMessage({
-      type: 'sdp-offer',
-      sdp: 'sdp-offer-placeholder',
-    });
+    try {
+      // Create SDP offer using werift
+      // Note: createOffer() will automatically add an audio transceiver if none exists
+      const sdp = await peerManager.createOffer();
+
+      this.sendMessage({
+        type: 'sdp-offer',
+        sdp,
+      });
+
+      logger.info('SDP offer sent to client', {
+        sessionId: this.sessionId,
+        sdpLength: sdp.length,
+      });
+    } catch (error) {
+      logger.error(
+        'Failed to send SDP offer',
+        error instanceof Error ? error : { message: String(error) },
+        { sessionId: this.sessionId }
+      );
+      this.sendError('sdp_offer_failed');
+    }
   }
 
   /**
@@ -305,6 +410,16 @@ class WebRTCWebSocketConnection {
     this.sendMessage({
       type: 'error',
       error,
+    });
+  }
+
+  /**
+   * Send ICE candidate to client
+   */
+  private sendICECandidate(candidate: RTCIceCandidateInit): void {
+    this.sendMessage({
+      type: 'ice-candidate',
+      candidate,
     });
   }
 

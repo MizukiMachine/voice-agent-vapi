@@ -13,8 +13,7 @@ import {
 import { logRequestError, getTraceId, createServiceLogger } from '@/app/lib/logger';
 import {
   createWebRTCSession,
-  generateSDPOffer,
-  generateIceServers,
+  createDefaultIceServers,
 } from '@/app/lib/webrtc-session-manager';
 import type {
   CreateSessionRequest,
@@ -282,17 +281,15 @@ export async function POST(request: NextRequest) {
     const speed = config?.speed ?? CARTESIA_DEFAULT_SPEED;
     const voiceId = config?.voiceId ?? CARTESIA_VOICE_ID;
 
-    // Generate SDP offer for client
-    const iceServers = generateIceServers();
-    const sdpOffer = generateSDPOffer({
-      sessionId: session.sessionId,
-      iceServers,
-    });
+    // Generate ICE servers for WebRTC
+    // Note: SDP offer will be generated when WebSocket connection is established
+    const iceServers = createDefaultIceServers();
 
     // Build server config response
     const serverConfig: WebRTCServerConfig = {
       sessionId: session.sessionId,
-      sdpOffer,
+      // SDP offer will be sent via WebSocket after connection
+      sdpOffer: '', // Placeholder, will be populated in WebSocket handler
       iceServers,
       vapiConfig: {
         publicKey: VAPI_PUBLIC_KEY,

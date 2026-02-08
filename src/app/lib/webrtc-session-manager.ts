@@ -4,12 +4,20 @@
  *
  * This module handles:
  * - Session lifecycle (create, get, close, cleanup)
- * - SDP offer/answer generation
+ * - SDP offer/answer generation using werift
  * - Audio routing between client, Vapi, and Cartesia
+ * - Peer connection management
  */
 
 import { randomUUID } from 'crypto';
 import { createServiceLogger } from './logger';
+import {
+  createWebRTCPeerManager,
+  createDefaultIceServers,
+  type WebRTCPeerManager,
+  type WebRTCSessionEvents,
+  type PeerConnectionConfig,
+} from './webrtc-peer-manager';
 
 const logger = createServiceLogger('webrtc-session-manager');
 
@@ -24,6 +32,8 @@ export interface WebRTCSession {
   createdAt: number;
   lastActivityAt: number;
   status: 'created' | 'connected' | 'disconnected' | 'error';
+  // Peer connection manager (initialized when needed)
+  peerManager?: WebRTCPeerManager;
 }
 
 export interface SessionConfig {
@@ -212,8 +222,12 @@ export function getWebRTCSession(sessionId: string): WebRTCSession | undefined {
 
 /**
  * Close a WebRTC session
+ * Also closes the peer connection if it exists
  */
-export function closeWebRTCSession(sessionId: string): boolean {
+export async function closeWebRTCSession(sessionId: string): Promise<boolean> {
+  // Close peer connection first
+  await closePeerConnection(sessionId);
+
   return sessionStore.close(sessionId);
 }
 
@@ -234,85 +248,76 @@ export function getUserSessions(userId: string): WebRTCSession[] {
   return sessionStore.getByUser(userId);
 }
 
-/**
- * Generate SDP Offer for client
- * Note: This is a simplified implementation
- * In production, use a proper WebRTC library (werift, node-webrtc)
- */
-export interface SDPOfferConfig {
-  sessionId: string;
-  iceServers: RTCIceServer[];
-}
-
-export function generateSDPOffer(config: SDPOfferConfig): string {
-  // This is a minimal SDP offer template
-  // In production, generate this using a WebRTC library
-
-  const offer = `v=0
-o=- ${config.sessionId} 2 IN IP4 0.0.0.0
-s=-
-t=0 0
-a=group:BUNDLE 0 1
-a=msid-semantic:WMS *
-m=application 9 UDP/DTLS/SCTP webrtc-datachannel
-c=IN IP4 0.0.0.0
-a=ice-ufrag:${config.sessionId.substring(0, 8)}
-a=ice-pwd:${config.sessionId.substring(8, 16)}
-a=ice-options:trickle
-a=fingerprint:sha-256 AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA
-a=setup:actpass
-a=mid:1
-a=sctp-port:5000
-a=max-message-size:262144
-m=audio 9 UDP/TLS/RTP/SAVPF 111 103 104 9 102 0 8 106 105 13 110 112 113 126
-c=IN IP4 0.0.0.0
-a=rtcp:9 IN IP4 0.0.0.0
-a=ice-ufrag:${config.sessionId.substring(0, 8)}
-a=ice-pwd:${config.sessionId.substring(8, 16)}
-a=ice-options:trickle
-a=fingerprint:sha-256 AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA
-a=setup:actpass
-a=mid:0
-a=sendrecv
-a=rtpmap:111 opus/48000/2
-a=fmtp:111 minptime=10;useinbandfec=1
-a=rtpmap:103 ISAC/16000
-a=rtpmap:104 ISAC/32000
-a=rtpmap:9 G722/8000
-a=rtpmap:102 ILBC/8000
-a=rtpmap:0 PCMU/8000
-a=rtpmap:8 PCMA/8000
-a=rtpmap:106 CN/32000
-a=rtpmap:105 CN/16000
-a=rtpmap:13 CN/8000
-a=rtpmap:110 telephone-event/48000
-a=rtpmap:112 telephone-event/32000
-a=rtpmap:113 telephone-event/16000
-a=rtpmap:126 telephone-event/8000
-a=ssrc:${config.sessionId.substring(0, 8)} cname:0
-a=ssrc:${config.sessionId.substring(0, 8)} msid:audio audio
-a=ssrc:${config.sessionId.substring(0, 8)} mslabel:audio
-a=ssrc:${config.sessionId.substring(0, 8)} label:audio`;
-
-  return offer;
-}
+// ============================================================
+// WebRTC Peer Connection Management
+// ============================================================
 
 /**
- * Generate ICE servers configuration
+ * Create and initialize a peer connection manager for a session
  */
-export function generateIceServers(customServers?: RTCIceServer[]): RTCIceServer[] {
-  const defaultServers: RTCIceServer[] = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ];
-
-  if (customServers && customServers.length > 0) {
-    return [...customServers, ...defaultServers];
+export function createPeerConnection(
+  sessionId: string,
+  events?: WebRTCSessionEvents,
+  config?: Partial<PeerConnectionConfig>
+): WebRTCPeerManager {
+  const session = getWebRTCSession(sessionId);
+  if (!session) {
+    throw new Error(`Session ${sessionId} not found`);
   }
 
-  return defaultServers;
+  // Use default ICE servers if not provided
+  const iceServers = config?.iceServers ?? createDefaultIceServers();
+
+  const peerManager = createWebRTCPeerManager(
+    {
+      sessionId,
+      iceServers,
+      iceTransportPolicy: config?.iceTransportPolicy,
+      bundlePolicy: config?.bundlePolicy,
+    },
+    events
+  );
+
+  // Store peer manager in session
+  session.peerManager = peerManager;
+
+  logger.info('Peer connection created for session', { sessionId });
+
+  return peerManager;
+}
+
+/**
+ * Get peer connection manager for a session
+ */
+export function getPeerConnection(sessionId: string): WebRTCPeerManager | undefined {
+  const session = getWebRTCSession(sessionId);
+  return session?.peerManager;
+}
+
+/**
+ * Close peer connection for a session
+ */
+export async function closePeerConnection(sessionId: string): Promise<void> {
+  const session = getWebRTCSession(sessionId);
+  if (session?.peerManager) {
+    await session.peerManager.close();
+    session.peerManager = undefined;
+    logger.info('Peer connection closed for session', { sessionId });
+  }
 }
 
 // ============================================================
 // Re-exports for convenience
 // ============================================================
+
+// Re-export types and functions from webrtc-peer-manager
+export type {
+  RTCIceServer,
+  WebRTCSessionEvents,
+  RTCPeerConnectionState,
+  RTCIceConnectionState,
+} from './webrtc-peer-manager';
+
+export {
+  createDefaultIceServers,
+} from './webrtc-peer-manager';
