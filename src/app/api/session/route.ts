@@ -6,18 +6,51 @@ import {
   UserMemorySlot,
 } from '@/app/lib/supabase';
 import { ApiError, ErrorCodes, createErrorResponse } from '@/app/lib/errors';
-import { isValidUUID } from '@/app/lib/validation';
+import {
+  isValidUUID,
+  validateSessionConfig,
+} from '@/app/lib/validation';
 import { logRequestError, getTraceId, createServiceLogger } from '@/app/lib/logger';
-import { randomUUID } from 'crypto';
+import {
+  createWebRTCSession,
+  generateSDPOffer,
+  generateIceServers,
+} from '@/app/lib/webrtc-session-manager';
+import type {
+  CreateSessionRequest,
+  CreateSessionResponse,
+  WebRTCServerConfig,
+} from '@/app/types';
 
 const logger = createServiceLogger('session');
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const REALTIME_MODEL = 'gpt-realtime';
+// ============================================================
+// Environment Variables
+// ============================================================
+
+// Vapi Configuration
+const VAPI_API_KEY = process.env.VAPI_API_KEY;
+const VAPI_PUBLIC_KEY = process.env.VAPI_PUBLIC_KEY;
+const VAPI_ASSISTANT_ID = process.env.VAPI_ASSISTANT_ID;
+
+// Cartesia Configuration
+const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY;
+const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID || '79a125e8-cd45-4c05-9a83-4b0d4b0f3c29'; // Default: Lady voice
+const CARTESIA_DEFAULT_SPEED = parseFloat(process.env.CARTESIA_DEFAULT_SPEED || '1.0');
+
+// Legacy: OpenAI (for backward compatibility during migration)
+// TODO: Remove in Issue #17 when fully migrated to Vapi+Cartesia
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _REALTIME_MODEL = 'gpt-realtime';
 
 /**
  * Session store (in-memory, for PoC)
  * In production, use Redis or similar
+ *
+ * NOTE: Using the shared sessionStore from webrtc-session-manager
+ * This is kept here for backward compatibility with legacy OpenAI sessions
  */
 interface VoiceSession {
   sessionId: string;
@@ -49,8 +82,10 @@ if (typeof setInterval !== 'undefined') {
 
 /**
  * Tool definitions for OpenAI Realtime API
+ * TODO: Remove in Issue #17 when fully migrated to Vapi+Cartesia
  */
-const REALTIME_TOOLS = [
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _REALTIME_TOOLS = [
   {
     type: 'function' as const,
     name: 'calendar_action',
@@ -153,24 +188,36 @@ const REALTIME_TOOLS = [
 
 /**
  * POST /api/session
- * Create a new voice session with OpenAI Realtime API ephemeral token
+ * Create a new voice session with WebRTC server configuration
  *
+ * NEW FORMAT (Vapi + Cartesia):
  * Request body:
  * {
- *   "userId": string
+ *   "userId": string,
+ *   "config": {
+ *     "voiceId": string (optional),
+ *     "speed": number (optional, 0.5 - 2.0)
+ *   }
  * }
  *
  * Response:
  * {
  *   "sessionId": string,
- *   "clientSecret": string,
- *   "model": string
+ *   "serverConfig": {
+ *     "sessionId": string,
+ *     "sdpOffer": string,
+ *     "iceServers": RTCIceServer[],
+ *     "vapiConfig": {
+ *       "publicKey": string,
+ *       "assistantId": string
+ *     }
+ *   }
  * }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId } = body;
+    const { userId, config } = body as CreateSessionRequest;
 
     // Validate userId
     if (!userId || !isValidUUID(userId)) {
@@ -180,10 +227,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check OpenAI API key
-    if (!OPENAI_API_KEY) {
+    // Validate optional config
+    if (config) {
+      const validation = validateSessionConfig(config);
+      if (!validation.valid) {
+        return NextResponse.json(
+          createErrorResponse(ErrorCodes.INVALID_REQUEST, validation.errors.join(', ')),
+          { status: 400 }
+        );
+      }
+    }
+
+    // Check Vapi configuration
+    if (!VAPI_API_KEY || !VAPI_PUBLIC_KEY || !VAPI_ASSISTANT_ID) {
       return NextResponse.json(
-        createErrorResponse(ErrorCodes.OPENAI_ERROR, 'OpenAI API key is not configured'),
+        createErrorResponse(ErrorCodes.VAPI_ERROR, 'Vapi is not configured'),
+        { status: 500 }
+      );
+    }
+
+    // Check Cartesia configuration
+    if (!CARTESIA_API_KEY) {
+      return NextResponse.json(
+        createErrorResponse(ErrorCodes.CARTESIA_ERROR, 'Cartesia is not configured'),
         { status: 500 }
       );
     }
@@ -209,83 +275,44 @@ export async function POST(request: NextRequest) {
     const memorySlots = await getUserMemorySlots(userId);
     const systemPrompt = buildSystemPrompt(profile, memorySlots);
 
-    // Create OpenAI Realtime API session (GA: client_secrets endpoint)
-    const realtimeResponse = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
+    // Create WebRTC session
+    const session = createWebRTCSession(userId, systemPrompt);
+
+    // Get user's configured speed or use default
+    const speed = config?.speed ?? CARTESIA_DEFAULT_SPEED;
+    const voiceId = config?.voiceId ?? CARTESIA_VOICE_ID;
+
+    // Generate SDP offer for client
+    const iceServers = generateIceServers();
+    const sdpOffer = generateSDPOffer({
+      sessionId: session.sessionId,
+      iceServers,
+    });
+
+    // Build server config response
+    const serverConfig: WebRTCServerConfig = {
+      sessionId: session.sessionId,
+      sdpOffer,
+      iceServers,
+      vapiConfig: {
+        publicKey: VAPI_PUBLIC_KEY,
+        assistantId: VAPI_ASSISTANT_ID,
       },
-      body: JSON.stringify({
-        session: {
-          type: 'realtime',
-          model: REALTIME_MODEL,
-          instructions: systemPrompt,
-          tools: REALTIME_TOOLS,
-          audio: {
-            input: {
-              transcription: {
-                model: 'whisper-1',
-              },
-              turn_detection: {
-                type: 'server_vad',
-                threshold: 0.5,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 500,
-              },
-            },
-            output: {
-              voice: 'alloy',
-            },
-          },
-        },
-      }),
-    });
+    };
 
-    if (!realtimeResponse.ok) {
-      const errorText = await realtimeResponse.text();
-      logger.error(
-        'OpenAI Realtime session creation failed',
-        { message: `HTTP ${realtimeResponse.status}: ${errorText}` },
-        { httpStatus: realtimeResponse.status, response: errorText }
-      );
-      return NextResponse.json(
-        createErrorResponse(ErrorCodes.OPENAI_ERROR, `Failed to create Realtime session: ${realtimeResponse.status}`),
-        { status: 502 }
-      );
-    }
-
-    const realtimeData = await realtimeResponse.json();
-    const clientSecret = realtimeData.value;
-
-    if (!clientSecret) {
-      logger.error(
-        'No value in Realtime response',
-        { message: 'Missing response.value' },
-        { response: JSON.stringify(realtimeData) }
-      );
-      return NextResponse.json(
-        createErrorResponse(ErrorCodes.OPENAI_ERROR, 'Failed to obtain ephemeral token'),
-        { status: 502 }
-      );
-    }
-
-    // Store session locally
-    const sessionId = randomUUID();
-    sessionStore.set(sessionId, {
-      sessionId,
+    logger.info('WebRTC session created', {
+      sessionId: session.sessionId,
       userId,
-      systemPrompt,
-      createdAt: Date.now(),
+      voiceId,
+      speed,
     });
 
-    logger.info('Session created', { sessionId, userId, model: REALTIME_MODEL });
+    const response: CreateSessionResponse = {
+      sessionId: session.sessionId,
+      serverConfig,
+    };
 
-    return NextResponse.json({
-      sessionId,
-      clientSecret,
-      model: REALTIME_MODEL,
-    });
+    return NextResponse.json(response);
   } catch (error) {
     const traceId = await getTraceId();
     logRequestError('/api/session', 'POST', error instanceof Error ? error : { message: String(error) }, traceId);
