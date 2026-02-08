@@ -24,7 +24,6 @@
 import { NextRequest } from 'next/server';
 import { createServiceLogger } from '@/app/lib/logger';
 import {
-  getWebRTCSession,
   updateSessionStatus,
   closeWebRTCSession,
 } from '@/app/lib/webrtc-session-manager';
@@ -39,6 +38,7 @@ import {
   unregisterCallbacks,
 } from '@/app/lib/audio-gateway';
 import { VapiConfig, CartesiaConfig } from '@/app/types';
+import WebSocket from 'ws';
 
 const logger = createServiceLogger('webrtc-websocket');
 
@@ -118,12 +118,13 @@ export class WebRTCWebSocketHandler {
       });
 
       // Setup WebSocket close handler
+      // @ts-ignore - ws library type compatibility with Next.js (will be fixed in Issue #12)
       this.ws.on('close', () => {
         this handleClose();
       });
 
       // Setup WebSocket error handler
-      this.ws.on('error', (error: Error) => {
+      this.ws.on('error', (error: ErrorEvent) => {
         logger.error('WebSocket error', {
           sessionId: this.sessionId,
           error: error.message,

@@ -9,20 +9,17 @@ import { ApiError, ErrorCodes, createErrorResponse } from '@/app/lib/errors';
 import {
   isValidUUID,
   validateSessionConfig,
-  type SessionConfigValidation,
 } from '@/app/lib/validation';
 import { logRequestError, getTraceId, createServiceLogger } from '@/app/lib/logger';
 import {
   createWebRTCSession,
   generateSDPOffer,
   generateIceServers,
-  type SDPOfferConfig,
 } from '@/app/lib/webrtc-session-manager';
 import type {
   CreateSessionRequest,
   CreateSessionResponse,
   WebRTCServerConfig,
-  RTCIceServer,
 } from '@/app/types';
 
 const logger = createServiceLogger('session');
@@ -42,13 +39,11 @@ const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID || '79a125e8-cd45-4c05-9
 const CARTESIA_DEFAULT_SPEED = parseFloat(process.env.CARTESIA_DEFAULT_SPEED || '1.0');
 
 // Legacy: OpenAI (for backward compatibility during migration)
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const REALTIME_MODEL = 'gpt-realtime';
-
-const logger = createServiceLogger('session');
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const REALTIME_MODEL = 'gpt-realtime';
+// TODO: Remove in Issue #17 when fully migrated to Vapi+Cartesia
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _REALTIME_MODEL = 'gpt-realtime';
 
 /**
  * Session store (in-memory, for PoC)
@@ -87,8 +82,10 @@ if (typeof setInterval !== 'undefined') {
 
 /**
  * Tool definitions for OpenAI Realtime API
+ * TODO: Remove in Issue #17 when fully migrated to Vapi+Cartesia
  */
-const REALTIME_TOOLS = [
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _REALTIME_TOOLS = [
   {
     type: 'function' as const,
     name: 'calendar_action',

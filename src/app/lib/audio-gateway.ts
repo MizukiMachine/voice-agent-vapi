@@ -17,7 +17,6 @@ import { createServiceLogger } from './logger';
 import { createVapiClient, type VapiClient } from './vapi-client';
 import { createCartesiaClient, type CartesiaClient } from './cartesia-client';
 import {
-  getWebRTCSession,
   closeWebRTCSession,
   updateSessionStatus,
 } from './webrtc-session-manager';
