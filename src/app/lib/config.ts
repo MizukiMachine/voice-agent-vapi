@@ -211,7 +211,7 @@ export function getConfigSummary(): {
         url: getWebSocketUrl(),
       },
     };
-  } catch (error) {
+  } catch {
     return {
       vapi: { configured: false, hasAssistant: false },
       cartesia: { configured: false, voiceId: 'unknown', speed: 0 },
