@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ErrorCodes, createErrorResponse } from '@/app/lib/errors';
-import { logRequestError } from '@/app/lib/logger';
+import { logRequestError, createServiceLogger } from '@/app/lib/logger';
+import { getSupabaseAdmin } from '@/app/lib/supabase';
+import { loadCartesiaConfig } from '@/app/lib/config';
+import { createCartesiaClient } from '@/app/lib/cartesia-client';
+
+const logger = createServiceLogger('notification-api');
 
 /**
  * Notification types for simulation
@@ -8,24 +13,142 @@ import { logRequestError } from '@/app/lib/logger';
 type NotificationType = 'message' | 'calendar' | 'reminder' | 'alert' | 'custom';
 
 /**
+ * Notification simulator request
+ */
+interface NotificationSimulatorRequest {
+  userId?: string;
+  type?: NotificationType;
+  title?: string;
+  content: string;
+  appName?: string;
+}
+
+/**
+ * Get user notification TTS settings
+ */
+async function getUserNotificationSettings(userId: string) {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('notification_tts_enabled, notification_tts_max_length, notification_tts_include_title, notification_tts_include_body')
+    .eq('id', userId)
+    .single();
+
+  if (error || !data) {
+    // Return defaults
+    return {
+      enabled: true,
+      maxLength: 200,
+      includeTitle: true,
+      includeBody: true,
+    };
+  }
+
+  return {
+    enabled: data.notification_tts_enabled ?? true,
+    maxLength: data.notification_tts_max_length ?? 200,
+    includeTitle: data.notification_tts_include_title ?? true,
+    includeBody: data.notification_tts_include_body ?? true,
+  };
+}
+
+/**
+ * Clean text for TTS (remove emojis, excessive whitespace, etc.)
+ */
+function cleanTextForTTS(text: string): string {
+  return text
+    // Remove emojis (basic Unicode ranges)
+    .replace(/[\u{1F600}-\u{1F64F}]/gu, '') // emoticons
+    .replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // symbols & pictographs
+    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '') // transport & map symbols
+    .replace(/[\u{2600}-\u{26FF}]/gu, '')   // misc symbols
+    .replace(/[\u{2700}-\u{27BF}]/gu, '')   // dingbats
+    // Remove URLs
+    .replace(/https?:\/\/\S+/g, '')
+    // Remove excessive whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Truncate text to max length while preserving word boundaries
+ */
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+
+  const truncated = text.substring(0, maxLength);
+  const lastSpace = truncated.lastIndexOf(' ');
+
+  if (lastSpace > maxLength * 0.8) {
+    // If there's a space near the end, truncate there
+    return truncated.substring(0, lastSpace) + '...';
+  }
+
+  return truncated + '...';
+}
+
+/**
+ * Generate TTS audio using Cartesia
+ */
+async function generateNotificationTTS(text: string): Promise<string | null> {
+  try {
+    const cartesiaConfig = loadCartesiaConfig();
+
+    const cartesiaClient = createCartesiaClient({
+      apiKey: cartesiaConfig.apiKey,
+      voiceId: cartesiaConfig.voiceId,
+      speed: 1.0, // Use default speed for notifications
+      sampleRate: 24000,
+      outputFormat: 'pcm16',
+    });
+
+    // Connect and synthesize
+    await cartesiaClient.connect();
+
+    return new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cartesiaClient.disconnect();
+        reject(new Error('TTS generation timeout'));
+      }, 10000);
+
+      let audioData = Buffer.alloc(0);
+
+      cartesiaClient.onAudio((audio, isFinal) => {
+        audioData = Buffer.concat([audioData, audio]);
+        if (isFinal) {
+          clearTimeout(timeout);
+          cartesiaClient.disconnect();
+          resolve(audioData.toString('base64'));
+        }
+      });
+
+      cartesiaClient.onError((error) => {
+        clearTimeout(timeout);
+        cartesiaClient.disconnect();
+        reject(new Error(`TTS error: ${error}`));
+      });
+
+      cartesiaClient.synthesize(text);
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error('Failed to generate TTS', { message: errorMessage });
+    return null;
+  }
+}
+
+/**
  * POST /api/simulate/notification
- * Simulate a notification and store context for active session
- *
- * TODO: Phase 3 - Inject notification context into OpenAI Realtime session via data channel
+ * Simulate a notification with TTS generation
+ * Enhanced with user settings and Cartesia TTS integration
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { sessionId, type, title, content, appName } = body;
+    const body: NotificationSimulatorRequest = await request.json();
+    const { userId, type, title, content, appName } = body;
 
     // Validate request
-    if (!sessionId) {
-      return NextResponse.json(
-        createErrorResponse(ErrorCodes.INVALID_REQUEST, 'sessionId is required'),
-        { status: 400 }
-      );
-    }
-
     if (!content) {
       return NextResponse.json(
         createErrorResponse(ErrorCodes.INVALID_REQUEST, 'content is required'),
@@ -33,55 +156,83 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get user settings if userId provided
+    const settings = userId ? await getUserNotificationSettings(userId) : {
+      enabled: true,
+      maxLength: 200,
+      includeTitle: true,
+      includeBody: true,
+    };
+
+    // Check if TTS is enabled
+    if (!settings.enabled) {
+      logger.info('Notification TTS disabled for user', { userId });
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: 'Notification TTS is disabled',
+        notification: {
+          type: type || 'custom',
+          title,
+          content,
+          appName,
+        },
+      });
+    }
+
     // Build notification message based on type
     const notificationType: NotificationType = type || 'custom';
-    let message = `[システム通知] `;
+    let messageType = '';
 
     switch (notificationType) {
       case 'message':
-        message += `新しいメッセージが届きました。`;
-        if (appName) message += `\nアプリ: ${appName}`;
-        if (title) message += `\n送信者: ${title}`;
-        message += `\n内容: ${content}`;
+        messageType = '新しいメッセージです。';
         break;
-
       case 'calendar':
-        message += `カレンダーのリマインダーです。`;
-        if (title) message += `\n予定: ${title}`;
-        message += `\n詳細: ${content}`;
+        messageType = 'カレンダーのリマインダーです。';
         break;
-
       case 'reminder':
-        message += `リマインダーです。`;
-        if (title) message += `\nタイトル: ${title}`;
-        message += `\n内容: ${content}`;
+        messageType = 'リマインダーです。';
         break;
-
       case 'alert':
-        message += `重要な通知です。`;
-        if (title) message += `\nタイトル: ${title}`;
-        message += `\n内容: ${content}`;
+        messageType = '重要な通知です。';
         break;
-
       default:
-        if (title) message += `${title}: `;
-        message += content;
+        messageType = '';
     }
 
-    message += `\nユーザーにこの通知を自然に伝えてください。`;
+    // Build TTS message
+    const appPrefix = appName ? `${appName}から通知です。` : '';
+    const titlePart = title && settings.includeTitle ? `${title}。` : '';
+    const bodyPart = settings.includeBody ? content : '';
 
-    // TODO: Phase 3 - Send context to active OpenAI Realtime session
-    // For now, return the constructed message for debugging
+    let ttsText = `${appPrefix}${messageType}${titlePart}${bodyPart}`;
+    ttsText = cleanTextForTTS(ttsText);
+    ttsText = truncateText(ttsText, settings.maxLength);
+
+    logger.info('Generating notification TTS', {
+      userId,
+      type: notificationType,
+      textLength: ttsText.length,
+      maxLength: settings.maxLength,
+    });
+
+    // Generate TTS audio
+    const ttsAudio = await generateNotificationTTS(ttsText);
+
     return NextResponse.json({
       success: true,
-      message: 'Notification context prepared',
+      skipped: false,
       notification: {
         type: notificationType,
         title,
         content,
         appName,
       },
-      contextMessage: message,
+      tts: {
+        text: ttsText,
+        audio: ttsAudio,
+      },
     });
   } catch (error) {
     logRequestError('/api/simulate/notification', 'POST', error instanceof Error ? error : { message: String(error) });
