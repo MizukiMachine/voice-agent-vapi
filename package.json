@@ -14,11 +14,15 @@
     "dev": "nodemon --exec ts-node src/server.ts",
     "dev:next": "dotenvx run --convention=nextjs -- next dev",
     "dev:plain": "next dev",
+    "dev:websocket": "tsx src/websocket-server.ts",
+    "dev:dual": "concurrently \"npm:dev:next\" \"npm:dev:websocket\" --names \"NEXT,WS\" --prefix-colors \"blue,green\"",
+    "dev:all": "npm run dev:dual",
     "build": "next build",
     "build:plain": "next build",
     "start": "NODE_ENV=production ts-node src/server.ts",
     "start:next": "dotenvx run --convention=nextjs -- next start",
     "start:plain": "next start",
+    "start:websocket": "NODE_ENV=production tsx src/websocket-server.ts",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "format": "prettier --write .",
@@ -46,6 +50,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "@dotenvx/dotenvx": "^1.52.0",
     "@swc-node/register": "^1.11.1",
     "@swc/core": "^1.15.11",

@@ -114,6 +114,48 @@ export function loadCartesiaConfig(): CartesiaConfig {
 }
 
 // ============================================================
+// WebSocket Configuration
+// ============================================================
+
+/**
+ * Get WebSocket server URL for client-side connections
+ *
+ * Automatically determines the correct WebSocket URL based on environment:
+ * - Development: ws://localhost:3001/api/webrtc
+ * - Production: Based on NEXT_PUBLIC_WEBSOCKET_URL or derived from app URL
+ *
+ * @returns {string} WebSocket URL
+ */
+export function getWebSocketUrl(): string {
+  // Client-side environment variable takes precedence
+  if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_WEBSOCKET_URL) {
+    return process.env.NEXT_PUBLIC_WEBSOCKET_URL;
+  }
+
+  // Server-side: construct from environment
+  const wsPort = process.env.WEBSOCKET_PORT || '3001';
+  const hostname = process.env.HOSTNAME || 'localhost';
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction) {
+    // In production, use wss:// and the production hostname
+    return `wss://${hostname}/api/webrtc`;
+  } else {
+    // In development, use ws://localhost:3001
+    return `ws://localhost:${wsPort}/api/webrtc`;
+  }
+}
+
+/**
+ * Get WebSocket port for server configuration
+ *
+ * @returns {number} WebSocket server port
+ */
+export function getWebSocketPort(): number {
+  return parseInt(process.env.WEBSOCKET_PORT || '3001', 10);
+}
+
+// ============================================================
 // Configuration Validation
 // ============================================================
 
@@ -148,6 +190,7 @@ export function validateConfig(): boolean {
 export function getConfigSummary(): {
   vapi: { configured: boolean; hasAssistant: boolean };
   cartesia: { configured: boolean; voiceId: string; speed: number };
+  websocket: { port: number; url: string };
 } {
   try {
     const vapiConfig = loadVapiConfig();
@@ -163,11 +206,16 @@ export function getConfigSummary(): {
         voiceId: cartesiaConfig.voiceId,
         speed: cartesiaConfig.speed,
       },
+      websocket: {
+        port: getWebSocketPort(),
+        url: getWebSocketUrl(),
+      },
     };
-  } catch (error) {
+  } catch {
     return {
       vapi: { configured: false, hasAssistant: false },
       cartesia: { configured: false, voiceId: 'unknown', speed: 0 },
+      websocket: { port: getWebSocketPort(), url: getWebSocketUrl() },
     };
   }
 }
