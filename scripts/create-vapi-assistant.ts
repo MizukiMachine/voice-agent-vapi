@@ -35,10 +35,8 @@ interface VapiModelConfig {
 interface VapiVoiceConfig {
   provider: 'cartesia' | 'elevenlabs' | 'azure' | 'deepgram' | 'playht';
   voiceId?: string;
-  speed?: number;
-  // Cartesia specific
-  model?: string;
-  language?: string;
+  // Provider-specific options
+  [key: string]: unknown;
 }
 
 interface VapiTranscriberConfig {
@@ -114,10 +112,8 @@ async function createVapiAssistant(apiKey: string): Promise<VapiAssistantRespons
     },
     voice: {
       provider: 'cartesia',
-      // Default Japanese-optimized voice from Cartesia
-      // You can customize this with your own voice ID
-      speed: 1.0,
-      language: 'ja',
+      // Cartesia voice ID (use default or specify your trained voice)
+      voiceId: '79a125e8-cd45-4c05-9a83-4b0d4b0f3c29',
     },
     firstMessage: 'こんにちは！音声アシスタントです。カレンダー、メモ、地図検索などをお手伝いします。何かお手伝いできることはありますか？',
     transcriber: {
