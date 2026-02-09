@@ -162,7 +162,7 @@ export class VapiClient {
 
     if (!response.ok) {
       const responseBody = await response.text().catch(() => '');
-      logger.error('Failed to create Vapi call', {
+      logger.error('Failed to create Vapi call', undefined, {
         statusCode: response.status,
         statusText: response.statusText,
         responseBody,

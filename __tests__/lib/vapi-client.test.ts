@@ -42,7 +42,7 @@ class MockWebSocket {
     }
   }
 
-  on(event: 'open' | 'message' | 'error' | 'close', handler: (...args: unknown[]) => void) {
+  on(event: 'open' | 'message' | 'error' | 'close', handler: (..._args: unknown[]) => void) {
     switch (event) {
       case 'open':
         this.handlers.open = handler as () => void;
@@ -59,7 +59,7 @@ class MockWebSocket {
     }
   }
 
-  send(data: string) {
+  send(/* _data: string */) {
     if (this.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket is not open');
     }
@@ -100,9 +100,6 @@ jest.mock('ws', () => ({
   WebSocket: MockWebSocket,
 }));
 
-// Import the global fetch mock from setup
-import { mockFetchImpl } from '../setup';
-
 import {
   createVapiClient,
   VapiClient,
@@ -125,7 +122,7 @@ const createTestConfig = (): VapiConfig => ({
 });
 
 // Helper function to mock successful Vapi call creation
-const mockSuccessfulCallCreation = (callId: string = 'call-test-123') => {
+const mockSuccessfulCallCreation = (fetchSpy: jest.Spied<typeof global.fetch>, callId: string = 'call-test-123') => {
   const mockCallResponse = {
     id: callId,
     transport: {
@@ -134,15 +131,15 @@ const mockSuccessfulCallCreation = (callId: string = 'call-test-123') => {
     status: 'in-progress',
   };
 
-  mockFetchImpl.mockResolvedValueOnce({
+  fetchSpy.mockResolvedValueOnce({
     ok: true,
     json: async () => mockCallResponse,
   } as Response);
 };
 
 // Helper function to mock failed Vapi call creation
-const mockFailedCallCreation = (status: number, statusText: string, errorMessage: string) => {
-  mockFetchImpl.mockResolvedValueOnce({
+const mockFailedCallCreation = (fetchSpy: jest.Spied<typeof global.fetch>, status: number, statusText: string, errorMessage: string) => {
+  fetchSpy.mockResolvedValueOnce({
     ok: false,
     status,
     statusText,
@@ -182,13 +179,22 @@ describe('VapiClient - Constructor', () => {
 describe('VapiClient - Connection', () => {
   let client: VapiClient;
   let config: VapiConfig;
+  let fetchSpy: jest.Spied<typeof global.fetch>;
 
   beforeEach(() => {
     MockWebSocket.reset();
     config = createTestConfig();
     client = createVapiClient(config);
+
+    // Use spyOn to mock fetch properly
+    fetchSpy = jest.spyOn(global, 'fetch');
+
     // Mock successful fetch by default for connection tests
-    mockSuccessfulCallCreation();
+    mockSuccessfulCallCreation(fetchSpy);
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
   });
 
   test('should connect successfully', async () => {
@@ -247,13 +253,22 @@ describe('VapiClient - Connection', () => {
 describe('VapiClient - Message Handling', () => {
   let client: VapiClient;
   let config: VapiConfig;
+  let fetchSpy: jest.Spied<typeof global.fetch>;
 
   beforeEach(async () => {
     MockWebSocket.reset();
     config = createTestConfig();
     client = createVapiClient(config);
-    mockSuccessfulCallCreation();
+
+    // Use spyOn to mock fetch properly
+    fetchSpy = jest.spyOn(global, 'fetch');
+
+    mockSuccessfulCallCreation(fetchSpy);
     await client.connect();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
   });
 
   test('should handle function-call messages', () => {
@@ -355,13 +370,22 @@ describe('VapiClient - Message Handling', () => {
 describe('VapiClient - Audio Sending', () => {
   let client: VapiClient;
   let config: VapiConfig;
+  let fetchSpy: jest.Spied<typeof global.fetch>;
 
   beforeEach(async () => {
     MockWebSocket.reset();
     config = createTestConfig();
     client = createVapiClient(config);
-    mockSuccessfulCallCreation();
+
+    // Use spyOn to mock fetch properly
+    fetchSpy = jest.spyOn(global, 'fetch');
+
+    mockSuccessfulCallCreation(fetchSpy);
     await client.connect();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
   });
 
   test('should send audio data', async () => {
@@ -410,13 +434,22 @@ describe('VapiClient - Audio Sending', () => {
 describe('VapiClient - Function Call Result', () => {
   let client: VapiClient;
   let config: VapiConfig;
+  let fetchSpy: jest.Spied<typeof global.fetch>;
 
   beforeEach(async () => {
     MockWebSocket.reset();
     config = createTestConfig();
     client = createVapiClient(config);
-    mockSuccessfulCallCreation();
+
+    // Use spyOn to mock fetch properly
+    fetchSpy = jest.spyOn(global, 'fetch');
+
+    mockSuccessfulCallCreation(fetchSpy);
     await client.connect();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
   });
 
   test('should send function call result', () => {
@@ -441,13 +474,22 @@ describe('VapiClient - Function Call Result', () => {
 describe('VapiClient - Text Messages', () => {
   let client: VapiClient;
   let config: VapiConfig;
+  let fetchSpy: jest.Spied<typeof global.fetch>;
 
   beforeEach(async () => {
     MockWebSocket.reset();
     config = createTestConfig();
     client = createVapiClient(config);
-    mockSuccessfulCallCreation();
+
+    // Use spyOn to mock fetch properly
+    fetchSpy = jest.spyOn(global, 'fetch');
+
+    mockSuccessfulCallCreation(fetchSpy);
     await client.connect();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
   });
 
   test('should send text message', () => {
@@ -472,12 +514,21 @@ describe('VapiClient - Text Messages', () => {
 describe('VapiClient - Reconnect', () => {
   let client: VapiClient;
   let config: VapiConfig;
+  let fetchSpy: jest.Spied<typeof global.fetch>;
 
   beforeEach(() => {
     MockWebSocket.reset();
     config = createTestConfig();
     client = createVapiClient(config);
-    mockSuccessfulCallCreation();
+
+    // Use spyOn to mock fetch properly
+    fetchSpy = jest.spyOn(global, 'fetch');
+
+    mockSuccessfulCallCreation(fetchSpy);
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
   });
 
   test('should not reconnect on intentional close', async () => {
@@ -601,19 +652,20 @@ describe('VapiClient - Utility Methods', () => {
 describe('VapiClient - HTTP API Call Creation', () => {
   let client: VapiClient;
   let config: VapiConfig;
+  let fetchSpy: jest.Spied<typeof global.fetch>;
 
   beforeEach(() => {
     MockWebSocket.reset();
     config = createTestConfig();
     client = new VapiClient(config);
 
-    // Reset the global fetch mock
-    mockFetchImpl.mockReset();
+    // Use spyOn to mock fetch properly
+    fetchSpy = jest.spyOn(global, 'fetch');
   });
 
   afterEach(() => {
     // Clean up after each test
-    mockFetchImpl.mockReset();
+    fetchSpy.mockRestore();
   });
 
   test('should create Vapi call via HTTP API and connect to dynamic WebSocket URL', async () => {
@@ -626,8 +678,8 @@ describe('VapiClient - HTTP API Call Creation', () => {
       status: 'in-progress',
     };
 
-    // Set up fetch mock for this test
-    mockFetchImpl.mockResolvedValueOnce({
+    // Set up fetch spy for this test
+    fetchSpy.mockResolvedValueOnce({
       ok: true,
       json: async () => mockCallResponse,
     } as Response);
@@ -636,7 +688,7 @@ describe('VapiClient - HTTP API Call Creation', () => {
     await client.connect();
 
     // Verify HTTP API was called
-    expect(mockFetch).toHaveBeenCalledWith(
+    expect(fetchSpy).toHaveBeenCalledWith(
       'https://api.vapi.ai/call',
       expect.objectContaining({
         method: 'POST',
@@ -655,39 +707,28 @@ describe('VapiClient - HTTP API Call Creation', () => {
   });
 
   test('should handle HTTP API error (401 unauthorized)', async () => {
-    mockFetchImpl.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      statusText: 'Unauthorized',
-      text: async () => 'Invalid API key',
-    } as Response);
+    mockFailedCallCreation(fetchSpy, 401, 'Unauthorized', 'Invalid API key');
 
-    await expect(client.connect()).rejects.toThrow();
+    // Create a new client for this test to avoid reused state
+    const testClient = new VapiClient(config);
 
-    // Verify error was logged
-    expect(mockFetchImpl).toHaveBeenCalled();
+    // Verify error type and message
+    await expect(testClient.connect()).rejects.toThrow(VapiApiError);
+
+    // Verify fetch was called
+    expect(fetchSpy).toHaveBeenCalled();
   });
 
   test('should handle HTTP API error (400 bad request)', async () => {
-    mockFetchImpl.mockResolvedValueOnce({
-      ok: false,
-      status: 400,
-      statusText: 'Bad Request',
-      text: async () => 'Invalid assistant ID',
-    } as Response);
+    mockFailedCallCreation(fetchSpy, 400, 'Bad Request', 'Invalid assistant ID');
 
-    await expect(client.connect()).rejects.toThrow();
+    await expect(client.connect()).rejects.toThrow(VapiApiError);
   });
 
   test('should handle HTTP API error (500 server error)', async () => {
-    mockFetchImpl.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      text: async () => 'Server error',
-    } as Response);
+    mockFailedCallCreation(fetchSpy, 500, 'Internal Server Error', 'Server error');
 
-    await expect(client.connect()).rejects.toThrow();
+    await expect(client.connect()).rejects.toThrow(VapiApiError);
   });
 
   test('should use correct audio format in call creation request', async () => {
@@ -698,7 +739,7 @@ describe('VapiClient - HTTP API Call Creation', () => {
       },
     };
 
-    mockFetchImpl.mockResolvedValueOnce({
+    fetchSpy.mockResolvedValueOnce({
       ok: true,
       json: async () => mockCallResponse,
     } as Response);
@@ -706,8 +747,11 @@ describe('VapiClient - HTTP API Call Creation', () => {
     await client.connect();
 
     // Verify request body contains correct audio format
-    const fetchCall = mockFetchImpl.mock.calls[0];
-    const requestBody = JSON.parse(fetchCall[1].body);
+    const fetchCall = fetchSpy.mock.calls[0];
+    if (!fetchCall || !fetchCall[1]) {
+      throw new Error('fetch was not called correctly');
+    }
+    const requestBody = JSON.parse(fetchCall[1].body as string);
 
     expect(requestBody).toMatchObject({
       assistantId: 'test-assistant-id',
@@ -723,7 +767,7 @@ describe('VapiClient - HTTP API Call Creation', () => {
   });
 
   test('should handle network error during HTTP call creation', async () => {
-    mockFetchImpl.mockRejectedValueOnce(new Error('Network error'));
+    fetchSpy.mockRejectedValueOnce(new Error('Network error'));
 
     await expect(client.connect()).rejects.toThrow('Network error');
   });
