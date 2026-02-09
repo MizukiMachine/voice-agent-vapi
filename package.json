@@ -25,7 +25,8 @@
     "supabase:stop": "npx supabase stop",
     "dotenvx:encrypt": "dotenvx encrypt",
     "dotenvx:decrypt": "dotenvx decrypt",
-    "dotenvx:set": "dotenvx set"
+    "dotenvx:set": "dotenvx set",
+    "create-assistant": "tsx scripts/create-vapi-assistant.ts"
   },
   "dependencies": {
     "@cartesia/cartesia-js": "^1.2.0",
