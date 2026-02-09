@@ -374,9 +374,8 @@ export default function VoiceInterface({
       logger.info('Session created', { sessionId: sid });
 
       // Step 2: Create WebSocket connection to server
-      // Note: In production, this would use the WebSocket endpoint URL
-      // For now, we'll use a placeholder that would be replaced with actual WS URL
-      const wsUrl = `ws://localhost:3000/api/webrtc?sessionId=${sid}`;
+      // WebSocket server runs on port 3001 (separate from Next.js on port 3000)
+      const wsUrl = `ws://localhost:3001/api/webrtc?sessionId=${sid}`;
       const ws = new WebSocket(wsUrl);
 
       wsRef.current = ws;

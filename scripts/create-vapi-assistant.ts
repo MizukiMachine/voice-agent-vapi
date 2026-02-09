@@ -75,7 +75,7 @@ function loadEnv(): { apiKey: string; publicKey: string } {
       const envVars: Record<string, string> = {};
       envContent.split('\n').forEach((line: string) => {
         const match = line.match(/^([^=]+)=(.*)$/);
-        if (match && !line.trim().startsWith('#')) {
+        if (match && match[1] !== undefined && match[2] !== undefined && !line.trim().startsWith('#')) {
           envVars[match[1]] = match[2];
         }
       });

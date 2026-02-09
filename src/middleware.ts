@@ -35,11 +35,7 @@ export function middleware(request: NextRequest) {
   const traceId = existingTraceId || generateTraceId();
 
   // レスポンスにTrace-IDを設定
-  const response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  });
+  const response = NextResponse.next();
 
   // レスポンスヘッダーにTrace-IDを追加
   response.headers.set(TRACE_ID_HEADER, traceId);
@@ -59,13 +55,7 @@ export function middleware(request: NextRequest) {
  */
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // API routes only
+    '/api/:path*',
   ],
 };

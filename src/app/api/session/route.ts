@@ -33,6 +33,8 @@ const VAPI_PUBLIC_KEY = process.env.VAPI_PUBLIC_KEY;
 const VAPI_ASSISTANT_ID = process.env.VAPI_ASSISTANT_ID;
 
 // Cartesia Configuration
+// Note: CARTESIA_API_KEY is not required when using Vapi (Vapi uses its own Cartesia credits)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY;
 const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID || '79a125e8-cd45-4c05-9a83-4b0d4b0f3c29'; // Default: Lady voice
 const CARTESIA_DEFAULT_SPEED = parseFloat(process.env.CARTESIA_DEFAULT_SPEED || '1.0');
@@ -245,13 +247,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check Cartesia configuration
-    if (!CARTESIA_API_KEY) {
-      return NextResponse.json(
-        createErrorResponse(ErrorCodes.CARTESIA_ERROR, 'Cartesia is not configured'),
-        { status: 500 }
-      );
-    }
+    // Note: Cartesia API key is not required when using Vapi
+    // Vapi uses its own Cartesia credits, so direct Cartesia key is optional
 
     // Check Supabase
     if (!isSupabaseConfigured()) {

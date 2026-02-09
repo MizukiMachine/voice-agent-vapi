@@ -114,7 +114,7 @@ export interface VapiConfig {
  * Cartesia configuration
  */
 export interface CartesiaConfig {
-  apiKey: string; // Server-side only
+  apiKey?: string; // Server-side only (optional when using Vapi)
   voiceId: string;
   speed: number; // 0.5 - 2.0
   sampleRate: number; // e.g., 16000, 24000, 44100

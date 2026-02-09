@@ -68,24 +68,21 @@ export function loadVapiConfig(): VapiConfig {
 /**
  * Load Cartesia configuration from environment variables
  *
- * Required environment variables:
- * - CARTESIA_API_KEY: Server-side API key
+ * When using Vapi, the Cartesia API key is optional because Vapi uses its own Cartesia credits.
+ * Direct Cartesia API usage requires CARTESIA_API_KEY.
  *
  * Optional environment variables (with defaults):
+ * - CARTESIA_API_KEY: Server-side API key (optional when using Vapi)
  * - CARTESIA_VOICE_ID: Voice ID to use (default: '79a125e6-c5a2-4b9d-8b3f-5c2a1b2d3e4f')
  * - CARTESIA_DEFAULT_SPEED: Playback speed 0.5-2.0 (default: '1.0')
  * - CARTESIA_SAMPLE_RATE: Audio sample rate (default: '24000')
  * - CARTESIA_OUTPUT_FORMAT: Output format (default: 'pcm16')
  *
- * @throws {ConfigError} If required environment variables are missing
  * @returns {CartesiaConfig} Validated Cartesia configuration
  */
 export function loadCartesiaConfig(): CartesiaConfig {
+  // Cartesia API key is optional when using Vapi
   const apiKey = process.env.CARTESIA_API_KEY;
-
-  if (!apiKey) {
-    throw new ConfigError(['CARTESIA_API_KEY']);
-  }
 
   // Parse optional configuration with defaults
   const voiceId = process.env.CARTESIA_VOICE_ID || '79a125e6-c5a2-4b9d-8b3f-5c2a1b2d3e4f';
@@ -105,7 +102,7 @@ export function loadCartesiaConfig(): CartesiaConfig {
   }
 
   return {
-    apiKey: apiKey!, // Non-null assertion after validation
+    apiKey, // Optional - undefined when using Vapi
     voiceId,
     speed,
     sampleRate,

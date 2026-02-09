@@ -16,7 +16,7 @@ const logger = createServiceLogger('cartesia-client');
 // ============================================================
 
 export interface CartesiaConfig {
-  apiKey: string;
+  apiKey?: string; // Optional when using Vapi
   voiceId: string;
   speed: number; // 0.5 - 2.0
   sampleRate?: number; // e.g., 16000, 24000, 44100

@@ -140,7 +140,7 @@ export default function SettingsPanel({ userId }: SettingsPanelProps) {
           {/* クールタイム */}
           <div className="mb-4">
             <label className="mb-1 block text-sm text-zinc-700 dark:text-zinc-300">
-              クールタイム: {formatCoolTime(settings.location_cool_time)}
+              クールタイム: {formatCoolTime(settings.location_cool_time ?? 1800000)}
             </label>
             <input
               type="range"
