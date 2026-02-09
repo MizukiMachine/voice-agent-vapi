@@ -16,7 +16,6 @@ type NotificationType = 'message' | 'calendar' | 'reminder' | 'alert' | 'custom'
  * Notification simulator request
  */
 interface NotificationSimulatorRequest {
-  sessionId?: string;
   userId?: string;
   type?: NotificationType;
   title?: string;
@@ -90,35 +89,6 @@ function truncateText(text: string, maxLength: number): string {
 }
 
 /**
- * Build TTS message from notification data
- */
-function buildTTSMessage(
-  appName: string,
-  title: string | undefined,
-  content: string,
-  settings: {
-    includeTitle: boolean;
-    includeBody: boolean;
-  }
-): string {
-  const parts: string[] = [];
-
-  if (appName) {
-    parts.push(`${appName}から通知です。`);
-  }
-
-  if (title && settings.includeTitle) {
-    parts.push(`${title}。`);
-  }
-
-  if (settings.includeBody) {
-    parts.push(content);
-  }
-
-  return parts.join(' ');
-}
-
-/**
  * Generate TTS audio using Cartesia
  */
 async function generateNotificationTTS(text: string): Promise<string | null> {
@@ -175,7 +145,7 @@ async function generateNotificationTTS(text: string): Promise<string | null> {
 export async function POST(request: NextRequest) {
   try {
     const body: NotificationSimulatorRequest = await request.json();
-    const { sessionId, userId, type, title, content, appName } = body;
+    const { userId, type, title, content, appName } = body;
 
     // Validate request
     if (!content) {
