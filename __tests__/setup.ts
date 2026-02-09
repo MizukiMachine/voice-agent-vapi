@@ -14,6 +14,14 @@ process.env.GOOGLE_REFRESH_TOKEN = 'test-google-refresh-token';
 process.env.GOOGLE_MAPS_API_KEY = 'test-google-maps-key';
 process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
 
+// WebRTC関連の環境変数
+process.env.VAPI_API_KEY = 'test-vapi-api-key';
+process.env.VAPI_PUBLIC_KEY = 'test-vapi-public-key';
+process.env.VAPI_ASSISTANT_ID = 'test-assistant-id';
+process.env.CARTESIA_API_KEY = 'test-cartesia-api-key';
+process.env.CARTESIA_VOICE_ID = '79a125e8-cd45-4c05-9a83-4b0d4b0f3c29';
+process.env.CARTESIA_DEFAULT_SPEED = '1.0';
+
 // グローバルなテストユーティリティ
 export const TEST_USER_ID = 'test-user-uuid-12345';
 export const TEST_SESSION_ID = 'test-session-uuid-67890';
