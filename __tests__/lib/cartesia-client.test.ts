@@ -411,14 +411,14 @@ describe('CartesiaClient - Voice Management', () => {
     expect(client.contextId).toBeNull();
   });
 
-  test('should reset context', () => {
+  test('should reset context', async () => {
     client.onAudio(jest.fn());
 
-    // Set context via audio response
-    MockWebSocket.instances = [];
-    const ws = new MockWebSocket('wss://test', {});
-    MockWebSocket.instances.push(ws);
-    ws.simulateMessage({
+    // Connect first to register message handlers
+    await client.connect();
+
+    // Simulate audio response with context ID
+    MockWebSocket.instances[0]?.simulateMessage({
       context_id: 'ctx-123',
       audio: Buffer.from('test').toString('base64'),
     });
@@ -564,15 +564,17 @@ describe('CartesiaClient - Utility Methods', () => {
     expect(client.readyState).toBe(WebSocket.CLOSED);
   });
 
-  test('should return current context ID', () => {
+  test('should return current context ID', async () => {
     expect(client.contextId).toBeNull();
 
     // After receiving audio response, context ID should be set
     client.onAudio(jest.fn());
 
-    const ws = new MockWebSocket('wss://test', {});
-    MockWebSocket.instances.push(ws);
-    ws.simulateMessage({
+    // Connect first to register message handlers
+    await client.connect();
+
+    // Simulate audio response with context ID
+    MockWebSocket.instances[0]?.simulateMessage({
       context_id: 'ctx-test',
       audio: Buffer.from('test').toString('base64'),
     });

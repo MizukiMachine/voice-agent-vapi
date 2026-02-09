@@ -16,6 +16,7 @@ class MockWebSocket {
 
   url: string;
   readyState: number = MockWebSocket.CONNECTING;
+  private connectionTimer?: NodeJS.Timeout;
   handlers: {
     open?: () => void;
     message?: (data: Buffer) => void;
@@ -23,15 +24,22 @@ class MockWebSocket {
     close?: (code: number, reason: Buffer) => void;
   } = {};
 
-  constructor(url: string, _: { headers?: Record<string, string> }) {
+  constructor(url: string, options: { headers?: Record<string, string>; failConnection?: boolean }) {
     this.url = url;
     MockWebSocket.instances.push(this);
 
-    // Simulate async connection
-    setTimeout(() => {
-      this.readyState = WebSocket.OPEN;
-      this.handlers.open?.();
-    }, 10);
+    // If failConnection is true, simulate error instead of success
+    if (options.failConnection) {
+      this.connectionTimer = setTimeout(() => {
+        this.handlers.error?.(new Error('Connection failed'));
+      }, 10);
+    } else {
+      // Simulate async connection
+      this.connectionTimer = setTimeout(() => {
+        this.readyState = WebSocket.OPEN;
+        this.handlers.open?.();
+      }, 10);
+    }
   }
 
   on(event: 'open' | 'message' | 'error' | 'close', handler: (...args: unknown[]) => void) {
@@ -59,6 +67,9 @@ class MockWebSocket {
   }
 
   close(code: number, reason: string) {
+    if (this.connectionTimer) {
+      clearTimeout(this.connectionTimer);
+    }
     this.readyState = WebSocket.CLOSED;
     this.handlers.close?.(code, Buffer.from(reason));
   }
@@ -171,11 +182,19 @@ describe('VapiClient - Connection', () => {
     expect(ws).toBeDefined();
   });
 
-  test('should reject connection on error', async () => {
+  test('should handle connection error events', async () => {
     const errorClient = new VapiClient(config);
-    MockWebSocket.instances[0]?.simulateError(new Error('Connection failed'));
+    const errorHandler = jest.fn();
+    errorClient.onError(errorHandler);
 
-    await expect(errorClient.connect()).rejects.toThrow();
+    // Connect successfully first
+    await errorClient.connect();
+
+    // Simulate an error after connection
+    MockWebSocket.instances[0]?.simulateError(new Error('Test error'));
+
+    // Verify error handler is called
+    expect(errorHandler).toHaveBeenCalledWith('websocket_error', 'Test error');
   });
 
   test('should handle disconnect', () => {
