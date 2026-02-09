@@ -14,6 +14,15 @@
  * - HOSTNAME: Server hostname (default: localhost)
  */
 
+// Load environment variables from .env and .env.local
+import dotenv from 'dotenv';
+import { resolve } from 'path';
+
+// Load .env.local first (overrides .env)
+dotenv.config({ path: resolve(process.cwd(), '.env.local') });
+// Fallback to .env
+dotenv.config();
+
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';

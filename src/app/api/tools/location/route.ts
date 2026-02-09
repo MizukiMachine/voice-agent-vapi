@@ -88,7 +88,8 @@ interface UserPoiNotificationRecord {
 async function generatePOIDescription(poiName: string, types: string[]): Promise<string> {
   // For PoC, use a simple template
   // In production, this would use OpenAI API to generate contextual descriptions
-  const typeText = types.length > 0 ? types[0].replace(/_/g, ' ') : '場所';
+  const firstType = types.length > 0 ? types[0] : undefined;
+  const typeText = firstType ? firstType.replace(/_/g, ' ') : '場所';
   return `${poiName}は${typeText}です。`;
 }
 
@@ -138,7 +139,8 @@ async function generatePOITTS(text: string): Promise<string | null> {
       cartesiaClient.synthesize(text);
     });
   } catch (error) {
-    logger.error('Failed to generate TTS', { error: error instanceof Error ? error.message : String(error) });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error('Failed to generate TTS', { message: errorMessage });
     return null;
   }
 }
@@ -164,7 +166,7 @@ async function checkPoiCoolTime(
     .maybeSingle();
 
   if (error) {
-    logger.error('Failed to check POI cool-time', { error: error.message });
+    logger.error('Failed to check POI cool-time', { message: error.message });
     // On error, allow notification (fail open)
     return { skipped: false };
   }
@@ -208,7 +210,7 @@ async function recordPoiNotification(
   });
 
   if (error) {
-    logger.error('Failed to record POI notification', { error: error.message });
+    logger.error('Failed to record POI notification', { message: error.message });
   }
 }
 
