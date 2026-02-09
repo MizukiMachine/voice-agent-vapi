@@ -4,7 +4,8 @@
 # ============================================================
 
 # Build stage
-FROM node:20-alpine AS builder
+# Node.js 22.22.0+ required for CVE-2025-59466 fix (AsyncLocalStorage)
+FROM node:22.22-alpine AS builder
 
 WORKDIR /app
 
@@ -30,7 +31,9 @@ RUN npm run build:plain
 # Production stage
 # ============================================================
 
-FROM node:20-alpine AS runtime
+# Production stage
+# Node.js 22.22.0+ required for CVE-2025-59466 fix (AsyncLocalStorage)
+FROM node:22.22-alpine AS runtime
 
 WORKDIR /app
 
