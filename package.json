@@ -2,6 +2,14 @@
   "name": "voice-engine-studio",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.22.0",
+    "npm": ">=10.0.0"
+  },
+  "volta": {
+    "node": "22.22.0",
+    "npm": "10.9.3"
+  },
   "scripts": {
     "dev": "nodemon --exec ts-node src/server.ts",
     "dev:next": "dotenvx run --convention=nextjs -- next dev",
