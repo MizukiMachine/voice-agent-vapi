@@ -72,6 +72,41 @@ export type VapiTranscriptHandler = (transcript: string, isFinal: boolean) => vo
 export type VapiErrorHandler = (error: string, message?: string) => void;
 
 // ============================================================
+// Vapi HTTP API Types (for call creation)
+// ============================================================
+
+export interface VapiCallCreateRequest {
+  assistantId: string;
+  transport: {
+    provider: 'vapi.websocket';
+    audioFormat: {
+      format: 'pcm_s16le';
+      container: 'raw';
+      sampleRate: 16000;
+    };
+  };
+}
+
+export interface VapiCallCreateResponse {
+  id: string;
+  transport: {
+    websocketCallUrl: string;
+  };
+  status?: string;
+}
+
+export class VapiApiError extends Error {
+  constructor(
+    public statusCode: number,
+    public statusText: string,
+    public responseBody?: string
+  ) {
+    super(`Vapi API error: ${statusCode} ${statusText}`);
+    this.name = 'VapiApiError';
+  }
+}
+
+// ============================================================
 // Vapi Client
 // ============================================================
 
@@ -96,17 +131,78 @@ export class VapiClient {
   }
 
   /**
-   * Connect to Vapi WebSocket
+   * Create a Vapi call via HTTP API
+   * This returns a dynamic WebSocket URL for the actual connection
+   */
+  private async createVapiCall(): Promise<VapiCallCreateResponse> {
+    logger.info('Creating Vapi call via HTTP API', {
+      assistantId: this.config.assistantId,
+    });
+
+    const request: VapiCallCreateRequest = {
+      assistantId: this.config.assistantId,
+      transport: {
+        provider: 'vapi.websocket',
+        audioFormat: {
+          format: 'pcm_s16le',
+          container: 'raw',
+          sampleRate: 16000,
+        },
+      },
+    };
+
+    const response = await fetch('https://api.vapi.ai/call', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const responseBody = await response.text().catch(() => '');
+      logger.error('Failed to create Vapi call', {
+        statusCode: response.status,
+        statusText: response.statusText,
+        responseBody,
+      });
+
+      throw new VapiApiError(
+        response.status,
+        response.statusText,
+        responseBody
+      );
+    }
+
+    const callResponse = (await response.json()) as VapiCallCreateResponse;
+
+    logger.info('Vapi call created successfully', {
+      callId: callResponse.id,
+      wsUrl: callResponse.transport.websocketCallUrl.replace(/\/[^/]*$/, '/***'), // Sanitize URL for logs
+    });
+
+    return callResponse;
+  }
+
+  /**
+   * Connect to Vapi WebSocket using HTTP-first approach
+   * 1. Create a Vapi call via HTTP API to get dynamic WebSocket URL
+   * 2. Connect to the returned WebSocket URL
    */
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        // Vapi WebSocket endpoint
-        const wsUrl = 'wss://api.vapi.ai/ws';
+    try {
+      // Step 1: Create Vapi call via HTTP API to get dynamic WebSocket URL
+      const callResponse = await this.createVapiCall();
+      const wsUrl = callResponse.transport.websocketCallUrl;
 
-        logger.info('Connecting to Vapi WebSocket', {
-          assistantId: this.config.assistantId,
-        });
+      logger.info('Connecting to Vapi WebSocket', {
+        assistantId: this.config.assistantId,
+        callId: callResponse.id,
+      });
+
+      return new Promise((resolve, reject) => {
+        try {
 
         this.ws = new WebSocket(wsUrl, {
           headers: {
@@ -171,6 +267,12 @@ export class VapiClient {
         reject(error);
       }
     });
+    } catch (error) {
+      logger.error('Failed to create Vapi call', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   /**

@@ -39,3 +39,7 @@ export const mockSupabaseUser = {
 afterEach(() => {
   jest.clearAllMocks();
 });
+
+// Global fetch mock
+export const mockFetchImpl = jest.fn();
+global.fetch = mockFetchImpl as any;
