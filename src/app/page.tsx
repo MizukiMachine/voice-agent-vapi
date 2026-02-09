@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import CockpitPanel from '@/app/components/cockpit/CockpitPanel';
+import SettingsPanel from '@/app/components/cockpit/SettingsPanel';
 import VoiceInterface from '@/app/components/voice/VoiceInterface';
 import SimulatorPanel from '@/app/components/simulator/SimulatorPanel';
 import ConversationLog from '@/app/components/log/ConversationLog';
@@ -66,6 +67,7 @@ export default function Home() {
               onUserSelect={handleUserSelect}
               selectedUserId={selectedUser?.id || null}
             />
+            <SettingsPanel userId={selectedUser?.id || null} />
             <VoiceInterface
               user={selectedUser}
               onSessionStart={handleSessionStart}
