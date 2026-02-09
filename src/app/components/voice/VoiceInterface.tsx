@@ -1,19 +1,10 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { User, Message } from '@/app/types';
+import { User, Message, CreateSessionResponse } from '@/app/types';
 import { createClientLogger } from '@/app/lib/logger-client';
 
 const logger = createClientLogger('voice');
-
-const REALTIME_API_URL = 'https://api.openai.com/v1/realtime/calls';
-
-interface VoiceInterfaceProps {
-  user: User | null;
-  onSessionStart: (sessionId: string) => void;
-  onSessionEnd: () => void;
-  onMessage: (message: Message) => void;
-}
 
 /**
  * Tool name → API route mapping
@@ -25,6 +16,23 @@ const TOOL_ROUTE_MAP: Record<string, string> = {
   map_action: '/api/tools/location',
 };
 
+interface VoiceInterfaceProps {
+  user: User | null;
+  onSessionStart: (sessionId: string) => void;
+  onSessionEnd: () => void;
+  onMessage: (message: Message) => void;
+}
+
+/**
+ * VoiceInterface - Server-Side WebRTC (Vapi + Cartesia)
+ *
+ * This component connects to the server's WebSocket endpoint for WebRTC signaling
+ * and audio streaming. The server handles Vapi (STT+LLM) and Cartesia (TTS) integration.
+ *
+ * Architecture:
+ * Client --WebSocket--> Server --Vapi WS--> Vapi API
+ *                      --Cartesia WS--> Cartesia API
+ */
 export default function VoiceInterface({
   user,
   onSessionStart,
@@ -38,30 +46,51 @@ export default function VoiceInterface({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
+  // Refs
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const dcRef = useRef<RTCDataChannel | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const audioQueueRef = useRef<AudioBuffer[]>([]);
+  const isPlayingRef = useRef(false);
 
+  /**
+   * Cleanup connection
+   */
   const cleanupConnection = useCallback(() => {
-    if (dcRef.current) {
-      dcRef.current.close();
-      dcRef.current = null;
+    logger.info('Cleaning up connection');
+
+    // Close WebSocket
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
     }
+
+    // Close WebRTC PeerConnection
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
+
+    // Stop local media stream
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
+
+    // Clear audio element
     if (audioRef.current) {
       audioRef.current.srcObject = null;
     }
+
+    // Clear audio queue
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
   }, []);
 
-  // Cleanup on unmount
+  /**
+   * Cleanup on unmount
+   */
   useEffect(() => {
     return () => {
       cleanupConnection();
@@ -69,8 +98,7 @@ export default function VoiceInterface({
   }, [cleanupConnection]);
 
   /**
-   * Execute a function call by routing to the appropriate tool API endpoint.
-   * Wraps arguments in the existing VAPI-compatible format that tool routes expect.
+   * Execute a function call by routing to the appropriate tool API endpoint
    */
   const executeFunctionCall = useCallback(
     async (callId: string, name: string, args: Record<string, unknown>): Promise<string> => {
@@ -131,121 +159,204 @@ export default function VoiceInterface({
   );
 
   /**
-   * Handle incoming data channel messages from OpenAI Realtime API
+   * Handle WebSocket message from server
    */
-  const handleDataChannelMessage = useCallback(
-    async (event: MessageEvent, dc: RTCDataChannel) => {
+  const handleWebSocketMessage = useCallback(
+    async (event: MessageEvent) => {
       try {
         const msg = JSON.parse(event.data);
+        logger.debug('WebSocket message received', { type: msg.type });
 
         switch (msg.type) {
-          // GA: response.audio_transcript.done → response.output_audio_transcript.done
-          case 'response.output_audio_transcript.done':
-          case 'response.audio_transcript.done': // Fallback for compatibility
-            onMessage({
-              id: `assistant-${Date.now()}`,
-              role: 'assistant',
-              content: msg.transcript || '',
-              timestamp: new Date(),
+          case 'sdp-offer':
+            // Server sent SDP offer - create answer and send back
+            await handleSDPOffer(msg.sdp);
+            break;
+
+          case 'ice-candidate':
+            // Server sent ICE candidate - add to peer connection
+            await handleICECandidate(msg.candidate);
+            break;
+
+          case 'audio':
+            // Server sent audio data - play it
+            handleIncomingAudio(msg.data);
+            break;
+
+          case 'function-call':
+            // Server received function call from Vapi - execute it
+            const result = await executeFunctionCall(msg.callId, msg.name, msg.parameters);
+            // Send result back to server
+            sendWebSocketMessage({
+              type: 'function-result',
+              callId: msg.callId,
+              result,
             });
-            setIsSpeaking(false);
-            break;
-
-          // GA: response.audio.delta → response.output_audio.delta
-          case 'response.output_audio.delta':
-          case 'response.audio.delta': // Fallback for compatibility
-            setIsSpeaking(true);
-            break;
-
-          case 'response.output_audio.done':
-          case 'response.audio.done': // Fallback for compatibility
-            setIsSpeaking(false);
-            break;
-
-          case 'conversation.item.input_audio_transcription.completed':
-            if (msg.transcript) {
-              onMessage({
-                id: `user-${Date.now()}`,
-                role: 'user',
-                content: msg.transcript,
-                timestamp: new Date(),
-              });
-            }
-            break;
-
-          case 'response.function_call_arguments.done': {
-            const fnCallId = msg.call_id;
-            const fnName = msg.name;
-            const fnArgs = JSON.parse(msg.arguments || '{}');
-
-            const result = await executeFunctionCall(fnCallId, fnName, fnArgs);
-
-            // Send function call output back to Realtime API
-            dc.send(
-              JSON.stringify({
-                type: 'conversation.item.create',
-                item: {
-                  type: 'function_call_output',
-                  call_id: fnCallId,
-                  output: result,
-                },
-              })
-            );
-
-            // Trigger the model to respond after receiving function output
-            dc.send(JSON.stringify({ type: 'response.create' }));
-            break;
-          }
-
-          case 'response.done':
-            setIsSpeaking(false);
             break;
 
           case 'error':
-            logger.error('Realtime API error', { error: msg.error });
-            setError(msg.error?.message || 'Realtime API error');
+            logger.error('Server error', { error: msg.error });
+            setError(msg.error);
             break;
 
-          // GA: conversation.item.created → conversation.item.added/done
-          case 'conversation.item.added':
-          case 'conversation.item.done':
-          case 'session.created':
-          case 'session.updated':
-          case 'input_audio_buffer.speech_started':
-          case 'input_audio_buffer.speech_stopped':
-          case 'input_audio_buffer.committed':
-          case 'response.created':
-          case 'response.output_item.added':
-          case 'response.output_item.done':
-          case 'response.content_part.added':
-          case 'response.content_part.done':
-          case 'conversation.item.created': // Fallback for compatibility
-          case 'response.output_audio_transcript.delta':
-          case 'response.audio_transcript.delta': // Fallback for compatibility
-          case 'rate_limits.updated':
-            // Known events - log at debug level
-            logger.debug('Event', { type: msg.type });
+          case 'transcript':
+            // Optional: Server sends transcript updates
+            if (msg.text) {
+              onMessage({
+                id: `transcript-${Date.now()}`,
+                role: msg.role === 'assistant' ? 'assistant' : 'user',
+                content: msg.text,
+                timestamp: new Date(),
+              });
+
+              if (msg.role === 'assistant') {
+                setIsSpeaking(true);
+              }
+            }
+            break;
+
+          case 'transcript-end':
+            setIsSpeaking(false);
             break;
 
           default:
-            logger.debug('Unhandled event', { type: msg.type });
-            break;
+            logger.debug('Unknown WebSocket message type', { type: msg.type });
         }
       } catch (err) {
-        logger.error('Data channel message parse error', { error: String(err) });
+        logger.error('WebSocket message parse error', { error: String(err) });
       }
     },
     [onMessage, executeFunctionCall]
   );
 
+  /**
+   * Handle SDP offer from server
+   */
+  const handleSDPOffer = useCallback(async (sdp: string) => {
+    const pc = pcRef.current;
+    if (!pc) {
+      logger.error('PeerConnection not initialized');
+      return;
+    }
+
+    try {
+      logger.info('Setting remote SDP offer', { sdpLength: sdp.length });
+      await pc.setRemoteDescription({ type: 'offer', sdp });
+
+      // Create SDP answer
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      // Send answer to server
+      sendWebSocketMessage({
+        type: 'sdp-answer',
+        sdp: answer.sdp,
+      });
+
+      logger.info('SDP answer sent to server');
+    } catch (err) {
+      logger.error('SDP offer handling error', { error: String(err) });
+      setError('Failed to establish WebRTC connection');
+    }
+  }, []);
+
+  /**
+   * Handle ICE candidate from server
+   */
+  const handleICECandidate = useCallback(async (candidate: RTCIceCandidateInit) => {
+    const pc = pcRef.current;
+    if (!pc) {
+      return;
+    }
+
+    try {
+      await pc.addIceCandidate(candidate);
+      logger.debug('ICE candidate added');
+    } catch (err) {
+      logger.error('ICE candidate error', { error: String(err) });
+    }
+  }, []);
+
+  /**
+   * Handle incoming audio data from server
+   */
+  const handleIncomingAudio = useCallback(async (base64Data: string) => {
+    try {
+      // Decode base64 audio data
+      const audioData = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+
+      // Create audio context if needed
+      const audioContext = new AudioContext({ sampleRate: 24000 });
+
+      // Decode audio data
+      const audioBuffer = await audioContext.decodeAudioData(audioData.buffer);
+
+      // Add to queue
+      audioQueueRef.current.push(audioBuffer);
+
+      // Start playing if not already playing
+      if (!isPlayingRef.current) {
+        playAudioQueue();
+      }
+    } catch (err) {
+      logger.error('Audio decode error', { error: String(err) });
+    }
+  }, []);
+
+  /**
+   * Play audio queue
+   */
+  const playAudioQueue = useCallback(async () => {
+    if (audioQueueRef.current.length === 0 || isPlayingRef.current) {
+      return;
+    }
+
+    isPlayingRef.current = true;
+    setIsSpeaking(true);
+
+    const audioBuffer = audioQueueRef.current.shift()!;
+    const audioContext = new AudioContext({ sampleRate: 24000 });
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
+
+    source.onended = () => {
+      isPlayingRef.current = false;
+      if (audioQueueRef.current.length > 0) {
+        playAudioQueue();
+      } else {
+        setIsSpeaking(false);
+      }
+    };
+
+    source.start();
+  }, []);
+
+  /**
+   * Send message to WebSocket server
+   */
+  const sendWebSocketMessage = useCallback((message: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message));
+      logger.debug('WebSocket message sent', { type: message.type });
+    }
+  }, []);
+
+  /**
+   * Start voice session
+   */
   const startSession = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setError('Please select a user first');
+      return;
+    }
 
     setIsConnecting(true);
     setError(null);
 
     try {
-      // 1. Get ephemeral token from our server
+      // Step 1: Create session via API
       const res = await fetch('/api/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -257,13 +368,44 @@ export default function VoiceInterface({
         throw new Error(data.error?.message || 'Failed to create session');
       }
 
-      const { sessionId: sid, clientSecret, model } = await res.json();
+      const sessionData = (await res.json()) as CreateSessionResponse;
+      const { sessionId: sid, serverConfig } = sessionData;
 
-      // 2. Create RTCPeerConnection
-      const pc = new RTCPeerConnection();
+      logger.info('Session created', { sessionId: sid });
+
+      // Step 2: Create WebSocket connection to server
+      // Note: In production, this would use the WebSocket endpoint URL
+      // For now, we'll use a placeholder that would be replaced with actual WS URL
+      const wsUrl = `ws://localhost:3000/api/webrtc?sessionId=${sid}`;
+      const ws = new WebSocket(wsUrl);
+
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        logger.info('WebSocket connected');
+      };
+
+      ws.onmessage = handleWebSocketMessage;
+
+      ws.onerror = (event) => {
+        logger.error('WebSocket error', { event });
+        setError('WebSocket connection error');
+      };
+
+      ws.onclose = () => {
+        logger.info('WebSocket closed');
+        if (isActive) {
+          endSession();
+        }
+      };
+
+      // Step 3: Create RTCPeerConnection
+      const pc = new RTCPeerConnection({
+        iceServers: serverConfig.iceServers,
+      });
       pcRef.current = pc;
 
-      // 3. Set up remote audio playback
+      // Step 4: Set up remote audio playback
       const audioEl = new Audio();
       audioEl.autoplay = true;
       audioRef.current = audioEl;
@@ -273,56 +415,49 @@ export default function VoiceInterface({
         logger.info('Remote audio track received');
       };
 
-      // 4. Add local microphone track
+      // Step 5: Add local microphone track
       const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = localStream;
       localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
 
-      // 5. Create data channel for Realtime API events
-      const dc = pc.createDataChannel('oai-events');
-      dcRef.current = dc;
-
-      dc.onopen = () => {
-        logger.info('Data channel opened');
+      // Step 6: Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          sendWebSocketMessage({
+            type: 'ice-candidate',
+            candidate: event.candidate.toJSON(),
+          });
+        }
       };
 
-      dc.onmessage = (event) => handleDataChannelMessage(event, dc);
+      // Step 7: Wait for connection state
+      pc.onconnectionstatechange = () => {
+        logger.info('Connection state changed', { state: pc.connectionState });
 
-      // 6. Create SDP offer and set local description
+        if (pc.connectionState === 'connected') {
+          setIsActive(true);
+          setSessionId(sid);
+          setIsConnecting(false);
+          onSessionStart(sid);
+
+          onMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: `Session started for ${user.name} (Server-Side WebRTC)`,
+            timestamp: new Date(),
+          });
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          setError('WebRTC connection failed');
+          setIsActive(false);
+        }
+      };
+
+      // Create offer (will be sent when WS is connected)
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // 7. Exchange SDP with OpenAI Realtime API (GA: calls endpoint)
-      const sdpResponse = await fetch(REALTIME_API_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${clientSecret}`,
-          'Content-Type': 'application/sdp',
-        },
-        body: offer.sdp,
-      });
+      logger.info('WebRTC PeerConnection created', { sessionId: sid });
 
-      if (!sdpResponse.ok) {
-        throw new Error(`WebRTC SDP exchange failed: ${sdpResponse.status}`);
-      }
-
-      const answerSdp = await sdpResponse.text();
-      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-
-      // 8. Session established
-      setSessionId(sid);
-      setIsActive(true);
-      setIsConnecting(false);
-      onSessionStart(sid);
-
-      logger.info('WebRTC session established', { sessionId: sid, model });
-
-      onMessage({
-        id: `sys-${Date.now()}`,
-        role: 'system',
-        content: `Session started for ${user.name} (WebRTC)`,
-        timestamp: new Date(),
-      });
     } catch (err) {
       logger.error('Session start error', {
         error: err instanceof Error ? err.message : String(err),
@@ -331,8 +466,11 @@ export default function VoiceInterface({
       setIsConnecting(false);
       cleanupConnection();
     }
-  }, [user, onSessionStart, onMessage, handleDataChannelMessage, cleanupConnection]);
+  }, [user, onSessionStart, onMessage, handleWebSocketMessage, cleanupConnection, sendWebSocketMessage]);
 
+  /**
+   * End voice session
+   */
   const endSession = useCallback(() => {
     cleanupConnection();
 
@@ -349,8 +487,11 @@ export default function VoiceInterface({
     });
 
     onSessionEnd();
-  }, [onMessage, onSessionEnd, cleanupConnection]);
+  }, [cleanupConnection, onMessage, onSessionEnd]);
 
+  /**
+   * Toggle mute state
+   */
   const toggleMute = useCallback(() => {
     const newMuted = !isMuted;
     setIsMuted(newMuted);
@@ -373,7 +514,7 @@ export default function VoiceInterface({
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-        Voice Interface
+        Voice Interface (Server-Side WebRTC)
       </h2>
 
       <div className="space-y-4">
@@ -455,6 +596,13 @@ export default function VoiceInterface({
                 ? 'Ready to start'
                 : 'Not connected'}
         </div>
+
+        {/* Connection Info */}
+        {sessionId && (
+          <div className="rounded bg-zinc-100 p-2 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+            <div>Session ID: {sessionId.slice(0, 8)}...</div>
+          </div>
+        )}
       </div>
     </div>
   );
