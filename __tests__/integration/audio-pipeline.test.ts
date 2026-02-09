@@ -91,6 +91,8 @@ const createTestGatewayConfig = () => ({
     apiKey: 'test-cartesia-key',
     voiceId: '79a125e8-cd45-4c05-9a83-4b0d4b0f3c29',
     speed: 1.0,
+    sampleRate: 24000,
+    outputFormat: 'pcm16' as const,
   },
 });
 
