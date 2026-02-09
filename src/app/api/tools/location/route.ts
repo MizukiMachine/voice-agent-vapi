@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ErrorCodes, createErrorResponse } from '@/app/lib/errors';
 import { isValidCoordinates } from '@/app/lib/validation';
-import { logRequestError } from '@/app/lib/logger';
+import { logRequestError, createServiceLogger } from '@/app/lib/logger';
+import { getSupabaseAdmin } from '@/app/lib/supabase';
+import { loadCartesiaConfig } from '@/app/lib/config';
+import { createCartesiaClient } from '@/app/lib/cartesia-client';
+
+const logger = createServiceLogger('location-api');
 
 const GEOCODING_API_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
 const PLACES_API_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
@@ -26,6 +31,7 @@ interface LocationToolRequest {
           action: 'reverse_geocode' | 'nearby_places';
           latitude: number;
           longitude: number;
+          userId?: string;
           // For nearby_places
           type?: string;
           radius?: number;
@@ -45,6 +51,7 @@ interface GeocodeResult {
 }
 
 interface PlaceResult {
+  place_id: string;
   name: string;
   vicinity: string;
   types: string[];
@@ -53,8 +60,188 @@ interface PlaceResult {
 }
 
 /**
+ * POI information with TTS
+ */
+interface PoiInfo {
+  name: string;
+  types: string[];
+  description: string;
+  audio: string | null;
+}
+
+/**
+ * User POI notification record
+ */
+interface UserPoiNotificationRecord {
+  id: string;
+  user_id: string;
+  poi_id: string;
+  poi_name: string;
+  notified_at: string;
+  latitude: number;
+  longitude: number;
+}
+
+/**
+ * Generate POI description using OpenAI (or simple template for PoC)
+ */
+async function generatePOIDescription(poiName: string, types: string[]): Promise<string> {
+  // For PoC, use a simple template
+  // In production, this would use OpenAI API to generate contextual descriptions
+  const typeText = types.length > 0 ? types[0].replace(/_/g, ' ') : '場所';
+  return `${poiName}は${typeText}です。`;
+}
+
+/**
+ * Generate TTS audio for POI description using Cartesia
+ */
+async function generatePOITTS(text: string): Promise<string | null> {
+  try {
+    const cartesiaConfig = loadCartesiaConfig();
+
+    // In production, you would fetch user-specific voice settings
+    // For now, use the default config
+    const cartesiaClient = createCartesiaClient({
+      apiKey: cartesiaConfig.apiKey,
+      voiceId: cartesiaConfig.voiceId,
+      speed: cartesiaConfig.speed,
+      sampleRate: 24000,
+      outputFormat: 'pcm16',
+    });
+
+    // Connect and synthesize
+    await cartesiaClient.connect();
+
+    return new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cartesiaClient.disconnect();
+        reject(new Error('TTS generation timeout'));
+      }, 10000);
+
+      let audioData = Buffer.alloc(0);
+
+      cartesiaClient.onAudio((audio, isFinal) => {
+        audioData = Buffer.concat([audioData, audio]);
+        if (isFinal) {
+          clearTimeout(timeout);
+          cartesiaClient.disconnect();
+          resolve(audioData.toString('base64'));
+        }
+      });
+
+      cartesiaClient.onError((error) => {
+        clearTimeout(timeout);
+        cartesiaClient.disconnect();
+        reject(new Error(`TTS error: ${error}`));
+      });
+
+      cartesiaClient.synthesize(text);
+    });
+  } catch (error) {
+    logger.error('Failed to generate TTS', { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
+
+/**
+ * Check cool-time for POI notification
+ */
+async function checkPoiCoolTime(
+  userId: string,
+  poiId: string,
+  coolTimeMs: number
+): Promise<{ skipped: boolean; remainingTime?: number; lastNotification?: UserPoiNotificationRecord }> {
+  const supabase = getSupabaseAdmin();
+
+  // Get the most recent notification for this POI
+  const { data, error } = await supabase
+    .from('user_poi_notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('poi_id', poiId)
+    .order('notified_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    logger.error('Failed to check POI cool-time', { error: error.message });
+    // On error, allow notification (fail open)
+    return { skipped: false };
+  }
+
+  if (!data) {
+    // No previous notification, allow
+    return { skipped: false };
+  }
+
+  const timeSinceLast = Date.now() - new Date(data.notified_at).getTime();
+
+  if (timeSinceLast < coolTimeMs) {
+    return {
+      skipped: true,
+      remainingTime: coolTimeMs - timeSinceLast,
+      lastNotification: data,
+    };
+  }
+
+  return { skipped: false };
+}
+
+/**
+ * Record POI notification
+ */
+async function recordPoiNotification(
+  userId: string,
+  poiId: string,
+  poiName: string,
+  latitude: number,
+  longitude: number
+): Promise<void> {
+  const supabase = getSupabaseAdmin();
+
+  const { error } = await supabase.from('user_poi_notifications').insert({
+    user_id: userId,
+    poi_id: poiId,
+    poi_name: poiName,
+    latitude,
+    longitude,
+  });
+
+  if (error) {
+    logger.error('Failed to record POI notification', { error: error.message });
+  }
+}
+
+/**
+ * Get user settings for location features
+ */
+async function getUserLocationSettings(userId: string) {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('location_cool_time, location_search_radius')
+    .eq('id', userId)
+    .single();
+
+  if (error || !data) {
+    // Return defaults
+    return {
+      coolTime: 1800000, // 30 minutes
+      searchRadius: 100, // 100m
+    };
+  }
+
+  return {
+    coolTime: data.location_cool_time ?? 1800000,
+    searchRadius: data.location_search_radius ?? 100,
+  };
+}
+
+/**
  * POST /api/tools/location
  * VAPI Server Tool: Get location information from coordinates
+ * Enhanced with cool-time check and POI notification history
  */
 export async function POST(request: NextRequest) {
   try {
@@ -70,7 +257,7 @@ export async function POST(request: NextRequest) {
     }
 
     const args = toolCall.function.arguments;
-    const { action, latitude, longitude } = args;
+    const { action, latitude, longitude, userId } = args;
 
     // Validate coordinates
     const coordsValidation = isValidCoordinates(latitude, longitude);
@@ -141,8 +328,10 @@ export async function POST(request: NextRequest) {
       }
 
       case 'nearby_places': {
+        // Get user settings if userId provided
+        const settings = userId ? await getUserLocationSettings(userId) : { coolTime: 1800000, searchRadius: 500 };
         const type = args.type || 'point_of_interest';
-        const radius = args.radius || 500;
+        const radius = args.radius || settings.searchRadius;
 
         const response = await fetch(
           `${PLACES_API_URL}?location=${latitude},${longitude}&radius=${radius}&type=${type}&language=ja&key=${apiKey}`
@@ -162,17 +351,59 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        const places = (data.results || []).slice(0, 5).map((place: PlaceResult) => ({
-          name: place.name,
-          address: place.vicinity,
-          types: place.types?.slice(0, 3),
-          rating: place.rating,
-          reviewCount: place.user_ratings_total,
-        }));
+        const places = (data.results || []).slice(0, 5);
+
+        // If userId provided, check cool-time and generate TTS for first POI
+        let poiInfo: PoiInfo | null = null;
+        if (userId && places.length > 0) {
+          const firstPlace = places[0];
+
+          // Check cool-time
+          const coolTimeCheck = await checkPoiCoolTime(userId, firstPlace.place_id, settings.coolTime);
+
+          if (coolTimeCheck.skipped) {
+            result = {
+              success: true,
+              skipped: true,
+              remainingTime: coolTimeCheck.remainingTime,
+              lastNotification: coolTimeCheck.lastNotification,
+              places: places.map((p: PlaceResult) => ({
+                place_id: p.place_id,
+                name: p.name,
+                address: p.vicinity,
+                types: p.types?.slice(0, 3),
+              })),
+            };
+            break;
+          }
+
+          // Generate POI description and TTS
+          const description = await generatePOIDescription(firstPlace.name, firstPlace.types || []);
+          const ttsAudio = await generatePOITTS(description);
+
+          // Record notification
+          await recordPoiNotification(userId, firstPlace.place_id, firstPlace.name, latitude, longitude);
+
+          poiInfo = {
+            name: firstPlace.name,
+            types: firstPlace.types?.slice(0, 3) || [],
+            description,
+            audio: ttsAudio,
+          };
+        }
 
         result = {
           success: true,
-          places,
+          skipped: false,
+          places: places.map((p: PlaceResult) => ({
+            place_id: p.place_id,
+            name: p.name,
+            address: p.vicinity,
+            types: p.types?.slice(0, 3),
+            rating: p.rating,
+            reviewCount: p.user_ratings_total,
+          })),
+          ...(poiInfo && { poi: poiInfo }),
           count: places.length,
           searchRadius: radius,
         };
