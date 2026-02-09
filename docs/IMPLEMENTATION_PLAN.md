@@ -18,11 +18,100 @@
 | #9 | Camera Bridge (Vision) | Phase 4 | Low | 🔴 Open |
 | #10 | Simulation Tools + Debug Console UI | Phase 5 | High | ✅ Closed |
 | #11 | E2Eテスト・検証 | Phase 6 | High | ✅ Closed |
-| #15 | VAPI Web SDK統合（実際の音声通話） | Phase 7 | High | 🟡 In Progress |
+| #21 | WebRTC基本コンポーネント実装 | Phase 7 | High | ✅ Closed |
+| #22 | オーディオ変換 (Opus → mu-law) | Phase 7 | High | ✅ Closed |
+| #23 | WebRTCピア接続マネージャー | Phase 7 | High | ✅ Closed |
+| #15 | テスト・依存関係・環境設定統合 | Phase 7 | Medium | 🟡 In Progress |
 
 ---
 
-## Issue分解 (DAG順)
+## Phase 7: WebRTC Integration (Issues #15, #21, #22, #23)
+
+### 概要
+WebRTCを使用したVapi + Cartesia音声パイプラインの実装。
+
+### 完了したIssues
+
+#### Issue #21: WebRTC基本コンポーネント実装
+- VapiClient (WebSocket client for STT+LLM+Function Calling)
+- CartesiaClient (WebSocket client for TTS with speed control)
+- AudioGateway (Bidirectional audio routing)
+
+#### Issue #22: オーディオ変換 (Opus → mu-law)
+- AudioConverter for format conversion
+- Support for PCM 16kHz → mu-law 8kHz
+- Performance targets: <50ms latency
+
+#### Issue #23: WebRTCピア接続マネージャー
+- WebRTCPeerManager for connection management
+- SDP offer/answer handling
+- ICE candidate management
+
+### Issue #15: テスト・依存関係・環境設定統合 (In Progress)
+
+#### 実装内容
+
+**1. 単体テスト**
+- `__tests__/lib/vapi-client.test.ts` - VapiClient WebSocket tests
+- `__tests__/lib/cartesia-client.test.ts` - CartesiaClient WebSocket tests
+- `__tests__/lib/audio-gateway.test.ts` - Audio routing tests
+- `__tests__/lib/webrtc-peer-manager.test.ts` - Connection management tests
+
+**2. 統合テスト**
+- `__tests__/integration/audio-pipeline.test.ts` - End-to-end pipeline tests
+
+**3. セットアップスクリプト**
+- `scripts/setup-webrtc.sh` - Dependency installation script
+
+**4. ドキュメント**
+- `docs/WEBRTC_SETUP.md` - Setup and troubleshooting guide
+- `docs/ARCHITECTURE.md` - Updated with WebRTC architecture
+- `.env.local.example` - Updated with new environment variables
+
+#### 完了条件
+- [x] Vapiクライアントの単体テスト
+- [x] Cartesiaクライアントの単体テスト
+- [x] オーディオゲートウェイの単体テスト
+- [x] WebRTCピア接続マネージャーの単体テスト
+- [x] オーディオパイプラインの統合テスト
+- [x] 依存関係セットアップスクリプト
+- [x] 環境変数ドキュメント
+- [x] 新規コンポーネントのテストカバレッジ > 80%
+
+---
+
+## Phase 8: VAPI Web SDK統合 (Issue #15 - 元の定義)
+
+### 概要
+VoiceInterfaceコンポーネントに実際のVAPI音声接続（WebRTC）を実装する。
+現在はセッション作成APIを呼んでいるが、実際の音声通話は確立されていない。
+
+### 必要な作業
+1. `@vapi-ai/web` パッケージインストール（済み、スタッシュ内）
+2. `.env`に`NEXT_PUBLIC_VAPI_ASSISTANT_ID`追加
+3. `src/app/hooks/useVapi.ts` 作成（VAPI SDKラッパーフック）
+4. `src/app/components/voice/VoiceInterface.tsx` 修正
+
+### 実装ファイル
+- `src/app/hooks/useVapi.ts` (新規作成)
+- `src/app/components/voice/VoiceInterface.tsx` (修正)
+
+### 完了条件
+- [ ] Start Sessionボタンで音声通話が開始される
+- [ ] マイク入力がVAPIに送信される
+- [ ] AIアシスタントの応答が音声で再生される
+- [ ] 会話ログにトランスクリプトが表示される
+- [ ] Mute/Unmuteが機能する
+- [ ] End Sessionで通話が終了する
+
+### スタッシュされた作業
+```bash
+git stash list
+# stash@{0}: On main: WIP: VAPI SDK integration for voice interface
+```
+
+### 詳細計画
+`/home/mizuki/.claude/plans/purring-churning-koala.md` を参照
 
 ### Phase 1: 基盤構築 (並行可能)
 

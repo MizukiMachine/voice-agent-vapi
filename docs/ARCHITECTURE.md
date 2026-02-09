@@ -247,3 +247,109 @@ AI: "渋谷駅に着きましたね！ここは若者に人気のスポットで
 ### One API 原則
 
 全クライアント（Web / iOS / Meta Glass）が同一のAPIエンドポイントを使用する。
+
+## WebRTC Architecture (Vapi + Cartesia)
+
+### Component Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Voice Engine                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────┐         ┌─────────────┐         ┌──────────┐  │
+│  │   Client    │◄───────►│ Audio       │◄───────►│  Vapi    │  │
+│  │  (WebRTC)   │  Audio  │  Gateway    │  Text   │  (STT+   │  │
+│  └─────────────┘         └─────────────┘         │   LLM)   │  │
+│                                                  └──────────┘  │
+│                                                       │         │
+│                                                       ▼         │
+│                                                  ┌──────────┐   │
+│                                                  │ Cartesia │   │
+│                                                  │   (TTS)  │   │
+│                                                  └──────────┘   │
+│                                                       │         │
+│                                                       ▼         │
+│                                                  ┌──────────┐   │
+│                                                  │  Client  │   │
+│                                                  │ (Playback│   │
+│                                                  └──────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Audio Pipeline Flow
+
+```
+1. Client → Vapi (Audio Input)
+   ├─ WebRTC Audio Track (Opus/PCM, 16kHz)
+   ├─ AudioGateway: sendClientAudio()
+   └─ VapiClient: sendAudio() with format conversion
+
+2. Vapi → Gateway (Text Response)
+   ├─ WebSocket message: conversation-item
+   ├─ VapiClient: onMessage() handler
+   └─ AudioGateway routes to Cartesia
+
+3. Gateway → Cartesia (TTS Request)
+   ├─ AudioGateway detects assistant text
+   └─ CartesiaClient: synthesize(text)
+
+4. Cartesia → Client (Audio Output)
+   ├─ WebSocket message: audio (base64)
+   ├─ CartesiaClient: onAudio() handler
+   └─ AudioGateway: onAudio() callback → WebRTC Track
+```
+
+### WebSocket Signaling
+
+```
+Client                    Server                    Vapi/Cartesia
+  │                          │                            │
+  │──────── POST /session ───▶│                            │
+  │                          │────────── WebSocket ───────▶│
+  │◀───── session config ────│                            │
+  │                          │                            │
+  │──── WebRTC Audio ───────▶│                            │
+  │                          │────── Audio Data ─────────▶│
+  │                          │                            │
+  │                          │◀───── Text Response ────────│
+  │                          │────── TTS Request ─────────▶│
+  │                          │                            │
+  │                          │◀───── Audio Response ───────│
+  │◀── WebRTC Audio ─────────│                            │
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| VapiClient | `src/app/lib/vapi-client.ts` | WebSocket client for Vapi STT+LLM |
+| CartesiaClient | `src/app/lib/cartesia-client.ts` | WebSocket client for Cartesia TTS |
+| AudioGateway | `src/app/lib/audio-gateway.ts` | Audio routing orchestration |
+| AudioConverter | `src/app/lib/audio-converter.ts` | Opus/PCM → mu-law conversion |
+| WebRTCPeerManager | `src/app/lib/webrtc-peer-manager.ts` | WebRTC peer connection management |
+| WebRTCSessionManager | `src/app/lib/webrtc-session-manager.ts` | Session lifecycle management |
+
+### Audio Format Requirements
+
+| Stage | Format | Sample Rate | Bit Depth |
+|-------|--------|-------------|-----------|
+| WebRTC Input | Opus/PCM | 16kHz | 16-bit |
+| Vapi Required | mu-law | 8kHz | 8-bit |
+| Cartesia Output | PCM16 | 24kHz | 16-bit |
+
+### Connection Management
+
+- **Reconnect Logic**: Automatic reconnection up to 3 attempts
+- **Session Timeout**: Default 5 minutes (configurable)
+- **Error Handling**: Graceful degradation on connection loss
+
+### Testing
+
+See [WEBRTC_SETUP.md](./WEBRTC_SETUP.md) for test execution instructions.
+
+Test files:
+- `__tests__/lib/vapi-client.test.ts` - Vapi WebSocket client tests
+- `__tests__/lib/cartesia-client.test.ts` - Cartesia WebSocket client tests
+- `__tests__/lib/audio-gateway.test.ts` - Audio routing tests
+- `__tests__/integration/audio-pipeline.test.ts` - End-to-end pipeline tests
