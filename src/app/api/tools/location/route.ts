@@ -60,6 +60,29 @@ interface PlaceResult {
 }
 
 /**
+ * POI information with TTS
+ */
+interface PoiInfo {
+  name: string;
+  types: string[];
+  description: string;
+  audio: string | null;
+}
+
+/**
+ * User POI notification record
+ */
+interface UserPoiNotificationRecord {
+  id: string;
+  user_id: string;
+  poi_id: string;
+  poi_name: string;
+  notified_at: string;
+  latitude: number;
+  longitude: number;
+}
+
+/**
  * Generate POI description using OpenAI (or simple template for PoC)
  */
 async function generatePOIDescription(poiName: string, types: string[]): Promise<string> {
@@ -72,7 +95,7 @@ async function generatePOIDescription(poiName: string, types: string[]): Promise
 /**
  * Generate TTS audio for POI description using Cartesia
  */
-async function generatePOITTS(text: string, userId?: string): Promise<string | null> {
+async function generatePOITTS(text: string): Promise<string | null> {
   try {
     const cartesiaConfig = loadCartesiaConfig();
 
@@ -127,7 +150,7 @@ async function checkPoiCoolTime(
   userId: string,
   poiId: string,
   coolTimeMs: number
-): Promise<{ skipped: boolean; remainingTime?: number; lastNotification?: any }> {
+): Promise<{ skipped: boolean; remainingTime?: number; lastNotification?: UserPoiNotificationRecord }> {
   const supabase = getSupabaseAdmin();
 
   // Get the most recent notification for this POI
@@ -331,7 +354,7 @@ export async function POST(request: NextRequest) {
         const places = (data.results || []).slice(0, 5);
 
         // If userId provided, check cool-time and generate TTS for first POI
-        let poiInfo: any = null;
+        let poiInfo: PoiInfo | null = null;
         if (userId && places.length > 0) {
           const firstPlace = places[0];
 
