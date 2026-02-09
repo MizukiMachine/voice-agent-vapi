@@ -132,7 +132,8 @@ async function generateNotificationTTS(text: string): Promise<string | null> {
       cartesiaClient.synthesize(text);
     });
   } catch (error) {
-    logger.error('Failed to generate TTS', { error: error instanceof Error ? error.message : String(error) });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error('Failed to generate TTS', { message: errorMessage });
     return null;
   }
 }
